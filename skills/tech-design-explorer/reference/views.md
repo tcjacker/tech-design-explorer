@@ -1,0 +1,64 @@
+# View recipes and mermaid pitfalls
+
+## Choosing a view
+
+| The design says | Draw | Why |
+| --- | --- | --- |
+| "these parts exist and talk to each other" | `flowchart TB` + subgraphs | boundaries are the point |
+| "this is what happens on a request" | `sequenceDiagram` | order and who waits for whom |
+| "this object is in one of these states" | `stateDiagram-v2` | dead ends become visible |
+| "this is what we store" | `erDiagram` | ownership and cardinality |
+| "this is what happens when it breaks" | `flowchart TD` with diamonds | the branch is the content |
+| "we ship it in this order" | `flowchart LR` of phases | dependencies, not dates |
+| "we chose A over B" | HTML cards | a table beats a diagram for tradeoffs |
+
+Rules the generator follows, and you should too when hand-writing a view:
+
+- **5–12 nodes.** Over 12 and nobody reads it; the generator warns at 12.
+- **One idea per diagram.** Two ideas is two diagrams — add a second flow or a
+  second failure path instead of one bigger picture.
+- **The happy path goes left to right, failure goes top to bottom.** Readers use
+  direction as a signal.
+- **Every node is something that can fail.** If a box cannot fail independently,
+  it is a label on another box, not a node.
+- **Say the same word everywhere.** `Backend FSM` in the architecture, the
+  sequence, the state model and the failure path.
+
+## Mermaid pitfalls that silently break a render
+
+Verified against mermaid 11.x — these are the ones that actually bite:
+
+| Pitfall | What happens | Do this |
+| --- | --- | --- |
+| `:` inside a **state diagram** label or note | parse error, whole diagram fails | replace with `–`; the generator does this in `state_text()` |
+| single-line `note right of X: text …` | fragile with punctuation | use the block form: `note right of X` / text / `end note` |
+| `#` or `;` in any label | parse error | `esc()` swaps them for `＃` and `,` |
+| `"` inside a quoted label | ends the label early | swap for `'` |
+| unbalanced `->>+` activation in a sequence | a bar that never closes | use `-)`/`->>`, or close with `-)-` |
+| a very long label | one enormous node | `wrap_label()` breaks at ~22 chars, max 3 lines |
+| a node id starting with a digit, or containing `-` | parse error | `slug()` prefixes and underscores it |
+| CJK text | fine everywhere, quoted or not | no action needed |
+
+Colons are safe in flowchart edge labels, sequence messages and ER field notes —
+only the state parser is strict about them.
+
+## Layout knobs worth knowing
+
+- The page fits each diagram to its frame on render and re-fits on resize, so a
+  wide diagram gets small rather than clipped. Below ~0.5 scale it stops shrinking
+  and becomes pannable — that is the signal that the diagram has too many nodes.
+- A diagram wider than about twice its height moves its walkthrough panel below
+  the canvas automatically.
+- Node colour comes from `classDef` names (`ui`, `service`, `store`, `queue`,
+  `external`, `actor`, `failure`, `success`, `decision`, `phase`). The page swaps
+  the whole `classDef` block for a dark palette when the theme flips, so exported
+  SVG and PNG keep the colours of the theme they were exported in.
+- If you hand-write a view, use those same class names so it themes with the rest.
+
+## Verifying a diagram before you ship it
+
+`render_html.py` does not parse the mermaid — the browser does. The fastest check
+is to open the page and look at the section: a failed diagram renders as its own
+source in a `<pre>` with the parse error above it, so nothing is ever silently
+missing. `tests/validate_mermaid.mjs` parses every generated view headlessly if
+node, playwright and mermaid are available.

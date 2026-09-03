@@ -1,0 +1,11 @@
+{
+  "name": "tech-design-explorer",
+  "owner": { "name": "tcjacker" },
+  "plugins": [
+    {
+      "name": "tech-design-explorer",
+      "source": "./",
+      "description": "Design docs in, an interactive visual review artifact out."
+    }
+  ]
+}
