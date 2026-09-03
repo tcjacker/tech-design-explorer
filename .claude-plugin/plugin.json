@@ -1,0 +1,8 @@
+{
+  "name": "tech-design-explorer",
+  "description": "Turn a technical design doc, tech spec or RFC into an interactive HTML design explorer: overview, architecture, sequence, state, data, failure and rollout views plus ADR cards.",
+  "version": "0.1.0",
+  "author": { "name": "tcjacker" },
+  "homepage": "https://github.com/tcjacker/tech-design-explorer",
+  "keywords": ["design", "architecture", "diagram", "mermaid", "rfc", "review", "visualization"]
+}
