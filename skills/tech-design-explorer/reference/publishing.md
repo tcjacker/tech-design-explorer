@@ -19,6 +19,23 @@ python3 scripts/render_html.py design-summary.json -o design-explorer.html \
 ```
 That embeds ~2.6 MB and the page then works with no network at all.
 
+## Answering questions on your own machine
+
+```sh
+python3 scripts/ask_server.py design-explorer.html --open        # auto-detects claude / codex
+python3 scripts/ask_server.py design-explorer.html --agent codex
+python3 scripts/ask_server.py design-explorer.html --cmd "ollama run llama3"
+```
+
+Serves the page on `127.0.0.1:7654` and exposes two endpoints the page looks for by
+itself: `GET __tde/health` (which agent, if any) and `POST __tde/ask` (question in,
+answer out). Each question is sent to the agent's stdin as a prompt carrying the
+design document and the structured summary; whatever the agent prints is the answer.
+
+The agent runs as you, on your machine, with your credentials — nothing is uploaded,
+and the server binds to localhost only. One question is answered at a time.
+If no agent CLI is installed the page stays in copy-prompt mode and says so.
+
 ## Interface language
 
 `--lang auto` (the default) looks at the design summary itself: a predominantly CJK

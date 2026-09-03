@@ -145,10 +145,13 @@ code { background: var(--surface-2); padding: .1em .35em; border-radius: 5px; }
 
 /* ---------- layout ---------- */
 .shell { display: grid; grid-template-columns: var(--nav-w) minmax(0, 1fr); align-items: start; }
-.nav {
+.rail {
   position: sticky; top: var(--head-h); height: calc(100vh - var(--head-h));
-  overflow-y: auto; padding: 20px 12px 40px; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; border-right: 1px solid var(--border);
+  background: var(--bg); min-height: 0;
 }
+.nav { flex: 1 1 auto; overflow-y: auto; padding: 18px 12px 24px; min-height: 0; }
+.rail.ask-open .nav { flex: 0 1 34%; }
 .nav-group { margin-bottom: 18px; }
 .nav-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
   padding: 0 10px; margin-bottom: 6px; font-weight: 600; }
@@ -168,7 +171,14 @@ code { background: var(--surface-2); padding: .1em .35em; border-radius: 5px; }
 .main { padding: 26px 30px 120px; max-width: 1180px; }
 @media (max-width: 860px) {
   .shell { grid-template-columns: 1fr; }
-  .nav { display: none; }
+  .rail { display: none; }
+  .rail.sheet {
+    display: flex; position: fixed; inset: auto 0 0 0; top: auto; height: 82vh; z-index: 80;
+    border-right: none; border-top: 1px solid var(--border); border-radius: 18px 18px 0 0;
+    box-shadow: var(--shadow-lg); background: var(--surface);
+  }
+  .rail.sheet .nav { display: none; }
+  .rail.sheet .ask { height: 100% !important; }
   .main { padding: 18px 16px 90px; }
 }
 
@@ -267,10 +277,13 @@ tr:last-child td { border-bottom: none; }
 .dg-stagewrap {
   position: relative; min-height: 240px; max-height: 74vh; overflow: hidden; cursor: grab;
   background-image: radial-gradient(var(--bg-grid) 1px, transparent 1px);
-  background-size: 22px 22px; display: grid; place-items: center;
+  background-size: 22px 22px;
 }
 .dg-stagewrap.grabbing { cursor: grabbing; }
-.dg-stage { transform-origin: center center; transition: transform .18s cubic-bezier(.2,.7,.3,1); padding: 18px; }
+/* absolute + origin 0 0: centring is computed, never left to overflow alignment,
+   which silently start-aligns anything wider than its container */
+.dg-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0;
+  transition: transform .18s cubic-bezier(.2,.7,.3,1); }
 .dg-stage.dragging { transition: none; }
 .dg-stage svg { max-width: none !important; height: auto; display: block; }
 .dg-cap { padding: 11px 13px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border);
@@ -338,34 +351,57 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
 .check.info { border-left-color: var(--accent); }
 .check .where { font-family: var(--mono); font-size: 11.5px; color: var(--muted); flex: none; }
 
-/* ask drawer */
-.ask-fab { position: fixed; right: 22px; bottom: 22px; z-index: 60; height: 44px; border-radius: 24px;
-  padding: 0 17px; box-shadow: var(--shadow-lg); font-size: 14px; font-weight: 560; }
+/* ask dock — lives at the bottom of the left rail */
 .ask {
-  position: fixed; right: 0; top: 0; bottom: 0; width: min(430px, 100vw); z-index: 70;
-  background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg);
-  transform: translateX(102%); transition: transform .3s cubic-bezier(.2,.7,.3,1);
-  display: flex; flex-direction: column;
+  flex: 0 0 auto; height: 0; overflow: hidden; display: flex; flex-direction: column;
+  border-top: 1px solid var(--border); background: var(--surface);
+  transition: height .28s cubic-bezier(.2,.7,.3,1);
 }
-.ask.open { transform: none; }
-.ask-head { display: flex; align-items: center; gap: 9px; padding: 13px 15px; border-bottom: 1px solid var(--border); }
-.ask-head h3 { font-size: 14.5px; flex: 1; }
-.ask-log { flex: 1; overflow-y: auto; padding: 14px 15px; display: flex; flex-direction: column; gap: 12px; }
-.msg { padding: 11px 13px; border-radius: 12px; font-size: 13.8px; white-space: pre-wrap; }
-.msg.me { background: var(--accent-soft); color: var(--text); align-self: flex-end; max-width: 88%; }
+.rail.ask-open .ask { height: 66%; }
+.ask-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border-bottom: 1px solid var(--border); flex: none; }
+.ask-head h3 { font-size: 13.5px; flex: 1; }
+.ask-log { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.msg { padding: 9px 11px; border-radius: 11px; font-size: 13.2px; white-space: pre-wrap; word-break: break-word; }
+.msg.me { background: var(--accent-soft); color: var(--text); align-self: flex-end; max-width: 92%; }
 .msg.ai { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); }
-.msg.sys { background: transparent; color: var(--muted); font-size: 12.6px; padding: 0; }
-.ask-foot { padding: 12px 15px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+.msg.sys { background: transparent; color: var(--muted); font-size: 12.2px; padding: 0; }
+.ask-foot { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; gap: 7px; flex: none; }
 .ask-foot textarea {
-  flex: 1; resize: none; height: 60px; padding: 9px 11px; font: inherit; font-size: 13.6px;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+  flex: 1; resize: none; height: 52px; padding: 8px 10px; font: inherit; font-size: 13.2px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; color: var(--text);
 }
 .ask-foot textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 15px 12px; }
-.ask-chips .btn { font-size: 12px; height: 27px; }
-.scrim { position: fixed; inset: 0; background: rgba(9, 12, 18, .42); z-index: 65; opacity: 0;
-  pointer-events: none; transition: opacity .3s; }
-.scrim.on { opacity: 1; pointer-events: auto; }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 10px; flex: none; }
+.ask-chips .btn { font-size: 11.5px; height: 25px; padding: 0 8px; }
+.ask-toggle { margin: 0 12px 12px; flex: none; }
+.ask-fab {
+  position: fixed; left: 22px; bottom: 22px; z-index: 60; height: 42px; border-radius: 22px;
+  padding: 0 16px; box-shadow: var(--shadow-lg); font-size: 13.5px; font-weight: 560; display: none;
+}
+@media (max-width: 860px) { .ask-fab { display: inline-flex; } }
+
+/* source document */
+.doc-sec { border-left: 2px solid var(--border); padding-left: 14px; margin-bottom: 20px; }
+.doc-sec h3 { font-size: 15px; margin-bottom: 8px; }
+.doc-body { font-size: 14px; color: var(--text-2); }
+.doc-body p { margin: 0 0 .7em; }
+.doc-body ul, .doc-body ol { margin: 0 0 .8em; padding-left: 20px; }
+.doc-body li { margin-bottom: 4px; }
+.doc-body pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+  padding: 11px 13px; overflow-x: auto; font-size: 12.4px; }
+.doc-body table { margin-bottom: .8em; }
+.doc-body h4 { font-size: 13.5px; margin: 14px 0 6px; }
+.src-panel { margin-top: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  padding: 13px 15px; background: var(--surface-2); }
+.src-panel .src-head { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+
+/* change / delta */
+.delta-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
+.delta-legend b { font-family: var(--mono); font-size: 13px; }
+.d-add { color: var(--ok); } .d-mod { color: var(--warn); } .d-del { color: var(--danger); }
+td .chg { font-family: var(--mono); font-weight: 700; margin-right: 6px; }
 
 .toast { position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 20px); z-index: 90;
   background: var(--text); color: var(--bg); padding: 9px 15px; border-radius: 10px; font-size: 13px;
@@ -380,7 +416,7 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
   .card { opacity: 1; transform: none; }
 }
 @media print {
-  .top, .nav, .ask, .ask-fab, .scrim, .dg-bar, .story-panel { display: none !important; }
+  .top, .rail, .ask-fab, .dg-bar, .story-panel { display: none !important; }
   .shell { grid-template-columns: 1fr; }
   .card { opacity: 1 !important; transform: none !important; break-inside: avoid; box-shadow: none; }
   .card-body { display: block !important; }
@@ -404,25 +440,27 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
 </header>
 
 <div class="shell">
-  <nav class="nav" id="nav" aria-label="Sections"></nav>
+  <div class="rail" id="rail">
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <button class="btn ask-toggle" id="askToggle">✦ Ask about this design</button>
+    <aside class="ask" id="ask" aria-label="Ask about this design">
+      <div class="ask-head">
+        <h3>Ask about this design</h3>
+        <span class="pill" id="askMode">offline</span>
+        <button class="btn icon" id="askClose" aria-label="Close">✕</button>
+      </div>
+      <div class="ask-log" id="askLog"></div>
+      <div class="ask-chips" id="askChips"></div>
+      <div class="ask-foot">
+        <textarea id="askInput" placeholder="e.g. What happens if the CAS write fails twice?"></textarea>
+        <button class="btn primary" id="askSend">Send</button>
+      </div>
+    </aside>
+  </div>
   <main class="main" id="main"></main>
 </div>
 
-<button class="btn primary ask-fab" id="askFab">✦ Ask about this design</button>
-<div class="scrim" id="scrim"></div>
-<aside class="ask" id="ask" aria-label="Ask about this design">
-  <div class="ask-head">
-    <h3>Ask about this design</h3>
-    <span class="pill" id="askMode">offline</span>
-    <button class="btn icon" id="askClose" aria-label="Close">✕</button>
-  </div>
-  <div class="ask-log" id="askLog"></div>
-  <div class="ask-chips" id="askChips"></div>
-  <div class="ask-foot">
-    <textarea id="askInput" placeholder="e.g. What happens if the CAS write fails twice?"></textarea>
-    <button class="btn primary" id="askSend">Send</button>
-  </div>
-</aside>
+<button class="btn primary ask-fab" id="askFab">✦ Ask</button>
 <div class="toast" id="toast"></div>
 
 <!--MERMAID_SLOT-->
@@ -567,7 +605,14 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     var box = el("div", { class: "dg", "data-diagram": d.id });
     var state = { s: 1, x: 0, y: 0 };
     function apply() { stage.style.transform = "translate(" + state.x + "px," + state.y + "px) scale(" + state.s + ")"; }
-    function zoom(f) { state.s = Math.min(3.2, Math.max(0.18, state.s * f)); apply(); }
+    function zoom(f) {
+      var next = Math.min(3.2, Math.max(0.18, state.s * f));
+      var cx = wrap.clientWidth / 2, cy = wrap.clientHeight / 2;   // zoom about the middle
+      state.x = cx - (cx - state.x) * (next / state.s);
+      state.y = cy - (cy - state.y) * (next / state.s);
+      state.s = next;
+      apply();
+    }
     // Fit the rendered SVG to the frame: size the frame to the drawing first,
     // then scale down whatever still overflows. Nothing should start clipped.
     function fit() {
@@ -589,6 +634,8 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
       // a very wide diagram reads better with the walkthrough below it
       var story = box.closest(".story");
       if (story) story.classList.toggle("wide", w / h > 2.2);
+      state.x = Math.max(pad / 2, (wrap.clientWidth - w * state.s) / 2);
+      state.y = Math.max(pad / 2, (wrap.clientHeight - h * state.s) / 2);
       apply();
     }
 
@@ -636,10 +683,10 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
         if (document.fullscreenElement) document.exitFullscreen();
         else if (box.requestFullscreen) box.requestFullscreen();
       } }, ["⛶"]),
-      el("button", { class: "btn", title: t("ui.copyMmd", "Copy the mermaid source"), onclick: function () {
+      d.mermaid ? el("button", { class: "btn", title: t("ui.copyMmd", "Copy the mermaid source"), onclick: function () {
         navigator.clipboard.writeText(d.mermaid).then(function () { toast(t("toast.mmdCopied", "Mermaid source copied")); },
           function () { toast(t("toast.clipboard", "Clipboard blocked by the browser")); });
-      } }, ["mmd"]),
+      } }, ["mmd"]) : null,
       el("button", { class: "btn", title: t("ui.svg", "Download SVG"), onclick: function () {
         var s = serialize(); if (!s) return toast(t("toast.nothing", "Nothing to export yet"));
         download(d.id + ".svg", new Blob([s], { type: "image/svg+xml" }));
@@ -687,13 +734,20 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     return frame.busy;
   }
   function renderOnce(frame) {
+    if (frame.def.svg) {                       // hand-laid view: no engine involved
+      frame.stage.innerHTML = frame.def.svg;
+      frame.rendered = true;
+      settle(frame);
+      if (frame.onRendered) frame.onRendered();
+      return Promise.resolve();
+    }
     return loadMermaid().then(function (mermaid) {
       mermaid.initialize(mermaidConfig());
       var id = "m" + Math.random().toString(36).slice(2, 9);
       return mermaid.render(id, themedSource(frame.def.mermaid)).then(function (res) {
         frame.stage.innerHTML = res.svg || res;
         frame.rendered = true;
-        frame.fit();
+        settle(frame);
         if (frame.onRendered) frame.onRendered();
       });
     }).catch(function (err) {
@@ -702,10 +756,26 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
         el("div", { class: "empty", text: t("err.render", "Diagram could not be rendered here") +
           " (" + (err && err.message || err) + "). " +
           t("err.source", "The source is below — paste it into any mermaid viewer.") }),
-        el("pre", { text: frame.def.mermaid })
+        el("pre", { text: frame.def.mermaid || "" })
       ]));
     });
   }
+  // The layout box of an SVG must equal its drawing, or centring and fitting lie.
+  // Fit again on the next frame: fitting can itself change the column layout
+  // (a wide diagram moves its walkthrough below), which changes the space available.
+  function settle(frame) {
+    var svg = frame.stage.querySelector("svg");
+    if (svg && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) {
+      var vb = svg.viewBox.baseVal;
+      svg.removeAttribute("width");
+      svg.removeAttribute("height");
+      svg.style.width = vb.width + "px";
+      svg.style.height = vb.height + "px";
+    }
+    frame.fit();
+    requestAnimationFrame(function () { frame.fit(); });
+  }
+
   function renderAllDiagrams() {
     frames.forEach(function (f) { if (f.rendered || f.box.closest(".card.open")) renderDiagram(f); });
   }
@@ -741,6 +811,7 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     function targets() {
       var svg = frame.stage.querySelector("svg");
       if (!svg) return [];
+      if (mode === "swim") return Array.prototype.slice.call(svg.querySelectorAll(".swim-step"));
       if (mode === "edge") return Array.prototype.slice.call(svg.querySelectorAll(".edgePaths > path, .edgePath path"));
       if (mode === "node") return Array.prototype.slice.call(svg.querySelectorAll("g.node"));
       return Array.prototype.slice.call(svg.querySelectorAll(".messageText"));
@@ -748,6 +819,10 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     function lines() {
       var svg = frame.stage.querySelector("svg");
       if (!svg) return [];
+      if (mode === "swim") {
+        // the connector into step n carries data-step="n"
+        return Array.prototype.slice.call(svg.querySelectorAll(".link")).map(function (l) { return l; });
+      }
       return Array.prototype.slice.call(svg.querySelectorAll("[class*=messageLine]"));
     }
     function clear() {
@@ -763,12 +838,12 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
       if (idx >= 0) rows[idx].scrollIntoView({ block: "nearest" });
       clear();
       if (idx < 0) return;
-      var t = targets(), l = lines();
-      t.forEach(function (n, n2) {
-        if (n2 === idx) n.classList.add(mode === "edge" ? "edge-hot" : mode === "node" ? "node-hot" : "msg-hot");
-        else n.classList.add("msg-dim");
+      var hot = { edge: "edge-hot", node: "node-hot", swim: "msg-hot" }[mode] || "msg-hot";
+      targets().forEach(function (n, n2) { n.classList.add(n2 === idx ? hot : "msg-dim"); });
+      lines().forEach(function (n, n2) {
+        var on = mode === "swim" ? n2 === idx - 1 : n2 === idx;
+        n.classList.add(on ? "msg-hot" : "msg-dim");
       });
-      l.forEach(function (n, n2) { n.classList.add(n2 === idx ? "msg-hot" : "msg-dim"); });
     }
     function stop() { clearInterval(timer); timer = null; playBtn.textContent = "▶"; }
     playBtn.addEventListener("click", function () {
@@ -784,9 +859,83 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     return el("div", { class: "story" }, [frame.box, panel]);
   }
 
+  /* ---------- the source document ---------- */
+  var DOCS = S.document_sections || [];
+  var DOC_BY_ID = {};
+  DOCS.forEach(function (d) { DOC_BY_ID[d.id] = d; });
+
+  function inline(text) {
+    return esc(text)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (m, label, href) {
+        return /^https?:/.test(href) ? '<a href="' + esc(href) + '" rel="noreferrer">' + label + "</a>" : label;
+      });
+  }
+  function mdToHtml(md) {
+    var out = [], list = null, table = null, fence = null;
+    (String(md || "").split("\n")).forEach(function (line) {
+      if (line.trim().indexOf("```") === 0) {
+        if (fence === null) { fence = []; }
+        else { out.push("<pre>" + esc(fence.join("\n")) + "</pre>"); fence = null; }
+        return;
+      }
+      if (fence !== null) { fence.push(line); return; }
+      var cells = line.trim();
+      if (cells.charAt(0) === "|") {
+        var row = cells.replace(/^\||\|$/g, "").split("|").map(function (c) { return c.trim(); });
+        if (/^[\s:|-]+$/.test(cells)) return;
+        if (!table) { table = { head: row, rows: [] }; }
+        else { table.rows.push(row); }
+        return;
+      }
+      if (table) {
+        out.push("<div class='scroll-x'><table><thead><tr>" +
+          table.head.map(function (c) { return "<th>" + inline(c) + "</th>"; }).join("") +
+          "</tr></thead><tbody>" + table.rows.map(function (r) {
+            return "<tr>" + r.map(function (c) { return "<td>" + inline(c) + "</td>"; }).join("") + "</tr>";
+          }).join("") + "</tbody></table></div>");
+        table = null;
+      }
+      var m = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/.exec(line);
+      if (m) { (list = list || []).push("<li>" + inline(m[1]) + "</li>"); return; }
+      if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; }
+      var h = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (h) { out.push("<h4>" + inline(h[2]) + "</h4>"); return; }
+      if (line.trim()) out.push("<p>" + inline(line.trim()) + "</p>");
+    });
+    if (fence !== null) out.push("<pre>" + esc(fence.join("\n")) + "</pre>");
+    if (list) out.push("<ul>" + list.join("") + "</ul>");
+    if (table) {
+      out.push("<div class='scroll-x'><table><tbody>" + [table.head].concat(table.rows).map(function (r) {
+        return "<tr>" + r.map(function (c) { return "<td>" + inline(c) + "</td>"; }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div>");
+    }
+    return out.join("");
+  }
+  function docPanel(id) {
+    var sec = DOC_BY_ID[id];
+    if (!sec) return null;
+    return el("div", { class: "src-panel" }, [
+      el("div", { class: "src-head", text: t("ui.sourceOf", "From the design document") +
+        (sec.heading ? " · " + sec.heading : "") }),
+      el("div", { class: "doc-body", html: mdToHtml(sec.text) })
+    ]);
+  }
+  function buildDocument() {
+    if (!DOCS.length) return null;
+    return el("div", {}, DOCS.map(function (d) {
+      return el("div", { class: "doc-sec", id: "src-" + d.id }, [
+        d.heading ? el("h3", { text: d.heading }) : null,
+        el("div", { class: "doc-body", html: mdToHtml(d.text) })
+      ]);
+    }));
+  }
+
   /* ---------- section builders ---------- */
   var sections = [];
-  function section(id, title, badge, body) {
+  function section(id, title, badge, body, sourceId) {
     if (!body) return;
     sections.push({ id: id, title: title, badge: badge });
     var card = el("section", { class: "card open", id: id });
@@ -798,6 +947,14 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
       el("span", { class: "idx", text: String(sections.length) }),
       el("h2", { text: title }),
       badge ? el("span", { class: "pill", text: badge }) : null,
+      (sourceId && DOC_BY_ID[sourceId]) ? el("button", { class: "btn", title:
+        t("ui.sourceOf", "From the design document"), onclick: function (e) {
+          e.stopPropagation();
+          card.classList.add("open");
+          var panel = card.querySelector(".src-panel");
+          if (panel) { panel.remove(); return; }
+          card.querySelector(".card-body").appendChild(docPanel(sourceId));
+        } }, [t("ui.source", "Source")]) : null,
       el("button", { class: "btn icon", title: t("ui.focus", "Show only this section"), onclick: function (e) {
         e.stopPropagation();
         var on = document.body.classList.toggle("focus-mode");
@@ -887,6 +1044,53 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     }
     bodies.forEach(function (b) { box.appendChild(b); });
     return box;
+  }
+
+  function changeTag(type) {
+    var map = { added: ["d-add", "+", t("ui.added", "added")],
+                modified: ["d-mod", "~", t("ui.modified", "modified")],
+                removed: ["d-del", "−", t("ui.removed", "removed")] };
+    return map[type] || ["", "", t("ui.existing", "unchanged")];
+  }
+  function buildChangeImpact() {
+    var cs = S.current_state || {}, changes = S.changes || [];
+    if (!cs.summary && !has(cs.pain_points) && !has(changes)) return null;
+    var kids = [];
+    if (cs.summary || has(cs.pain_points)) {
+      kids.push(el("div", { class: "grid two" }, [
+        cs.summary ? el("div", { class: "tile" }, [
+          el("h4", { text: t("ui.currentState", "Today") }), el("p", { text: cs.summary })]) : null,
+        has(cs.pain_points) ? el("div", { class: "tile" }, [
+          el("h4", { text: t("ui.painPoints", "What hurts today") }),
+          el("ul", { class: "clean no" }, cs.pain_points.map(function (x) { return el("li", { text: x }); }))
+        ]) : null
+      ].filter(Boolean)));
+    }
+    if (has(changes)) {
+      kids.push(el("div", { class: "delta-legend" }, [
+        el("span", { class: "d-add", html: "<b>+</b> " + esc(t("ui.added", "added")) }),
+        el("span", { class: "d-mod", html: "<b>~</b> " + esc(t("ui.modified", "modified")) }),
+        el("span", { class: "d-del", html: "<b>−</b> " + esc(t("ui.removed", "removed")) })
+      ]));
+      kids.push(el("div", { class: "scroll-x" }, [el("table", {}, [
+        el("thead", {}, [el("tr", {}, [el("th", { text: t("th.target", "What") }),
+          el("th", { text: t("th.what", "Change") }), el("th", { text: t("th.why", "Why") }),
+          el("th", { text: t("th.files", "Where") })])]),
+        el("tbody", {}, changes.map(function (c) {
+          var tag = changeTag(c.type);
+          return el("tr", {}, [
+            el("td", { html: '<span class="chg ' + tag[0] + '">' + tag[1] + "</span><b>" +
+              esc(c.target) + "</b><br><span style='color:var(--muted)'>" + esc(tag[2]) +
+              (c.kind && c.kind !== "component" ? " · " + esc(c.kind) : "") + "</span>" }),
+            el("td", { text: c.what || "—" }),
+            el("td", { text: c.why || "—" }),
+            el("td", { html: has(c.files) ? c.files.map(function (f) {
+              return "<code>" + esc(f) + "</code>"; }).join("<br>") : "—" })
+          ]);
+        }))
+      ])]));
+    }
+    return el("div", {}, kids);
   }
 
   function buildComponentTable() {
@@ -1059,6 +1263,7 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     if (S.source_document) meta.push(el("span", { class: "pill", text: S.source_document }));
     var stats = [
       { n: (S.components || []).length, l: t("stat.components", "components") },
+      { n: (S.changes || []).length, l: t("stat.changes", "changes") },
       { n: (S.runtime_flows || []).length, l: t("stat.flows", "flows") },
       { n: (S.failure_paths || []).length, l: t("stat.failures", "failure paths") },
       { n: (S.decisions || []).length, l: t("stat.decisions", "decisions") },
@@ -1081,18 +1286,27 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
   /* ---------- assemble ---------- */
   function build() {
     buildHero();
-    section("summary", t("sec.summary", "Summary"), null, buildSummary());
-    section("stories", t("sec.stories", "Users and stories"), null, buildStories());
+    var src = S.source_map || {};
+    section("summary", t("sec.summary", "Summary"), null, buildSummary(), src.summary);
+    section("stories", t("sec.stories", "Users and stories"), null, buildStories(), src.story_flow);
     VIEWS.forEach(function (v) {
       var extra = { architecture: buildComponentTable, data_model: buildEntityTables,
-                    failure_paths: buildFailureTable, rollout_plan: buildPhaseList }[v.key];
-      var body = el("div", {}, [buildView(v), extra ? extra() : null]);
+                    failure_paths: buildFailureTable, rollout_plan: buildPhaseList,
+                    change_impact: buildChangeImpact }[v.key];
+      var body = el("div", {}, [
+        v.key === "change_impact" && extra ? extra() : null,
+        buildView(v),
+        v.key === "change_impact" ? null : (extra ? extra() : null)
+      ]);
       section(v.key, v.title,
-              v.diagrams.length > 1 ? v.diagrams.length + " " + t("ui.views", "views") : null, body);
+              v.diagrams.length > 1 ? v.diagrams.length + " " + t("ui.views", "views") : null,
+              body, (S.source_map || {})[v.key]);
     });
-    section("decisions", t("sec.decisions", "Design decisions"), null, buildDecisions());
-    section("risks", t("sec.risks", "Risks"), null, buildRisks());
-    section("questions", t("sec.questions", "Open questions"), null, buildQuestions());
+    section("decisions", t("sec.decisions", "Design decisions"), null, buildDecisions(), src.decisions);
+    section("risks", t("sec.risks", "Risks"), null, buildRisks(), src.risks);
+    section("questions", t("sec.questions", "Open questions"), null, buildQuestions(), src.questions);
+    section("document", t("sec.document", "Source document"),
+            DOCS.length ? String(DOCS.length) : null, buildDocument());
     section("checks", t("sec.checks", "Review checks"),
             CHECKS.length ? String(CHECKS.length) : null, buildChecks());
     main.appendChild(el("div", { class: "foot", html:
@@ -1113,10 +1327,10 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
       ]));
     });
     nav.appendChild(group);
-    if (CHECKS.length) {
-      var c = document.getElementById("checks");
+    ["checks", "document"].forEach(function (id) {
+      var c = document.getElementById(id);
       if (c) c.classList.remove("open");
-    }
+    });
   }
 
   /* ---------- interactions ---------- */
@@ -1200,38 +1414,73 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
       ["#askInput", "placeholder", "ask.placeholder",
        "e.g. What happens if the CAS write fails twice?"],
       ["#askSend", "text", "ask.send", "Send"],
-      ["#askFab", "text", "ask.title", "Ask about this design"]
+      ["#askToggle", "text", "ask.title", "Ask about this design"]
     ];
     set.forEach(function (row) {
       var node = $(row[0]); if (!node) return;
       var value = t(row[2], row[3]);
-      if (row[1] === "text") node.textContent = (row[0] === "#askFab" ? "✦ " : "") + value;
+      if (row[1] === "text") node.textContent = (row[0] === "#askToggle" ? "✦ " : "") + value;
       else node.setAttribute(row[1], value);
     });
     if (DATA.lang) document.documentElement.setAttribute("lang", DATA.lang);
   }
 
   /* ---------- ask panel ---------- */
-  var askApi = null, askBusy = false;
-  function context() {
+  var askApi = null, askBusy = false, bridge = null;
+
+  function detectBridge() {
+    if (location.protocol === "file:") return;
+    fetch("__tde/health", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (info) {
+        if (!info || !info.agent) return;
+        bridge = info;
+        $("#askMode").textContent = t("ask.agent", "local agent") + " · " + info.agent;
+        $("#askMode").className = "pill ok";
+        var label = { claude: "Claude Code", codex: "Codex" }[info.agent] || info.agent;
+        addMsg("sys", label + " " + t("ask.answersHere", "is answering from this machine") +
+          (DOCS.length ? " · " + t("ask.docContext", "the design document is loaded") : "") + ".");
+      })
+      .catch(function () {});
+  }
+  function clip(text, max) {
+    text = String(text || "");
+    return text.length > max ? text.slice(0, max) + "\n…(truncated)" : text;
+  }
+  function documentText() {
+    return DOCS.map(function (d) {
+      return (d.heading ? "## " + d.heading + "\n" : "") + d.text;
+    }).join("\n\n");
+  }
+  function summaryText() {
     var compact = JSON.parse(JSON.stringify(S));
     delete compact._component_ids;
-    var text = JSON.stringify(compact);
-    return text.length > 14000 ? text.slice(0, 14000) + "…(truncated)" : text;
+    delete compact.document_sections;
+    return JSON.stringify(compact);
   }
   function askPrompt(q) {
-    return "You are reviewing a technical design with an engineer who is reading its visual explorer.\n" +
-      "Answer ONLY from the design summary below. If the answer is not in it, say which part of the design " +
-      "is missing rather than inventing one. Be concrete and short (under 150 words), reference component " +
-      "names exactly as they appear.\n\n=== DESIGN SUMMARY (JSON) ===\n" + context() +
+    var doc = documentText();
+    return "You are answering a reviewer's question about the technical design below, while they " +
+      "look at its visual explorer.\n" +
+      "The design document is the source of truth; the structured summary is what the diagrams were " +
+      "generated from. Answer only from these two. If the answer is not in them, say which part of " +
+      "the design is missing instead of inventing one. Be concrete and short (under 180 words) and " +
+      "use component names exactly as they appear.\n\n" +
+      (doc ? "=== DESIGN DOCUMENT ===\n" + clip(doc, 26000) + "\n\n" : "") +
+      "=== STRUCTURED SUMMARY (JSON) ===\n" + clip(summaryText(), 12000) +
       "\n\n=== QUESTION ===\n" + q;
   }
   function addMsg(cls, text) {
     var m = el("div", { class: "msg " + cls, text: text });
     $("#askLog").appendChild(m); $("#askLog").scrollTop = 1e6; return m;
   }
-  function openAsk() { $("#ask").classList.add("open"); $("#scrim").classList.add("on"); $("#askInput").focus(); }
-  function closeAsk() { $("#ask").classList.remove("open"); $("#scrim").classList.remove("on"); }
+  function openAsk() {
+    $("#rail").classList.add("ask-open");
+    if (window.matchMedia("(max-width: 860px)").matches) $("#rail").classList.add("sheet");
+    $("#askInput").focus();
+  }
+  function closeAsk() { $("#rail").classList.remove("ask-open", "sheet"); }
+  function toggleAsk() { $("#rail").classList.contains("ask-open") ? closeAsk() : openAsk(); }
   function send() {
     var input = $("#askInput"), q = input.value.trim();
     if (!q || askBusy) return;
@@ -1244,6 +1493,18 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
         .catch(function (err) { out.textContent = t("ask.failed", "Could not answer") +
           " (" + (err && err.code || err) + ")."; })
         .then(function () { askBusy = false; });
+    } else if (bridge) {
+      askBusy = true;
+      var out2 = addMsg("ai", t("ask.thinking", "Thinking…"));
+      fetch("__tde/ask", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question: q, prompt: askPrompt(q) })
+      }).then(function (r) { return r.json(); })
+        .then(function (res) {
+          out2.textContent = (res && (res.answer || res.error)) || t("ask.failed", "Could not answer");
+        })
+        .catch(function (err) { out2.textContent = t("ask.failed", "Could not answer") + " (" + err + ")."; })
+        .then(function () { askBusy = false; $("#askLog").scrollTop = 1e6; });
     } else {
       var p = askPrompt(q);
       addMsg("sys", t("ask.noModel", "This page is not connected to a model. Copy the prompt " +
@@ -1258,9 +1519,9 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     }
   }
   function wireAsk() {
-    $("#askFab").addEventListener("click", openAsk);
+    $("#askFab").addEventListener("click", toggleAsk);
+    $("#askToggle").addEventListener("click", toggleAsk);
     $("#askClose").addEventListener("click", closeAsk);
-    $("#scrim").addEventListener("click", closeAsk);
     $("#askSend").addEventListener("click", send);
     $("#askInput").addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
@@ -1275,9 +1536,11 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
         [q.length > 46 ? q.slice(0, 44) + "…" : q]));
     });
     addMsg("sys", t("ask.intro", "Ask anything about this design. Answers are grounded in the " +
-      "extracted design summary, not the whole document."));
+      "design document that ships with this page, plus the structured summary the views were " +
+      "generated from."));
     // The `sample` capability exists only when this page runs as a published Claude Artifact
     // that declared it. Everywhere else the panel degrades to a copyable prompt.
+    detectBridge();
     if (window.claude && typeof window.claude.use === "function") {
       window.claude.use("sample").then(function (s) {
         if (!s) return;

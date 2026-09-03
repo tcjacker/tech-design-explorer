@@ -9,9 +9,14 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 Turn a design document into a **visual review artifact**: one self-contained HTML
 page a reviewer can understand in three to five minutes.
 
-The output is not "a diagram of the doc". It is a set of focused views —
-each answering one question — plus the decisions, failures and risks that a
-reviewer actually argues about.
+The document is the payload; the HTML is how it is read. The page ships the design
+doc itself, renders it, links every view back to the section it came from, and
+answers the reader's questions from it. The diagrams summarise the document — they
+never replace it.
+
+The output is not "a diagram of the doc". It is a set of focused views — each
+answering one question — plus the current state, this increment, the decisions,
+the failures and the risks that a reviewer actually argues about.
 
 ## Use this when
 
@@ -41,8 +46,11 @@ python3 $S/parse_design.py design.md -o design-summary.draft.json
 # 2. YOU read the document and the draft, then write design-summary.json
 #    (see reference/schema.md — the draft's `_gaps` list is your worklist)
 
-# 3. generate the views + the explorer
-python3 $S/render_html.py design-summary.json -o design-explorer.html
+# 3. generate the views + the explorer (--document ships the doc inside the page)
+python3 $S/render_html.py design-summary.json --document design.md -o design-explorer.html
+
+# 4. optional: serve it locally so Claude Code or Codex answers questions in the page
+python3 $S/ask_server.py design-explorer.html --open
 
 # or, for a shareable folder with the .mmd sources and a README
 python3 $S/export_bundle.py design-summary.json -o design-explorer/
@@ -79,9 +87,18 @@ as raw material. Rules that decide whether the artifact is any good:
   `next`), the detection, and where it comes to rest.
 - **Decisions need real alternatives.** Pros *and* cons for each, an explicit
   `chosen`, and a `reason` that would survive a reviewer asking "why not the other one?".
+- **Say what exists today and what this change touches.** Fill `current_state`,
+  mark every component `existing` / `added` / `modified` / `removed`, and give each
+  one an entry in `changes` with what and why. A reviewer's first question is
+  always "what is different?" — the before / delta / after views answer it.
+- **Trace each user story through the system.** `user_stories[].flow` is the list of
+  components the story passes through, in order, with what happens at each. That is
+  what the Story Flow lanes are drawn from; without it the story is just a sentence.
 - **Delete what the design does not have.** An empty section is worse than a missing
   one; omitted keys are simply skipped. Note the real gap in `open_questions`.
 - Drop `_gaps`, `_source_sections` and `_unclassified_sections` from the final file.
+  Keep `document_sections` and `source_map` — they are what puts the document in the
+  page — or pass `--document design.md` at render time and they are filled in for you.
 
 Field-by-field reference: `reference/schema.md`. Worked example:
 `examples/sample_design-summary.json` next to `examples/sample_design.md`.
@@ -90,9 +107,11 @@ Field-by-field reference: `reference/schema.md`. Worked example:
 
 One diagram, one idea; 5–12 nodes each. The generator picks the form per semantic:
 
-| What you extracted | View | Mermaid form |
+| What you extracted | View | Form |
 | --- | --- | --- |
 | primary `runtime_flow` | Overview | `flowchart LR` of the happy path |
+| `current_state` + `changes` + `change` per component | Current State and Change | before / delta / after `flowchart TB` + a change table |
+| `user_stories[].flow` | Story Flow | hand-laid swimlane SVG: one lane per participant, one column per step |
 | `components` + `connections` | Architecture | `flowchart TB` with a subgraph per group |
 | each `runtime_flow` | Runtime Flow | `sequenceDiagram` + a step walkthrough |
 | `states` | State Model | `stateDiagram-v2` |
@@ -116,6 +135,9 @@ render (colons in state labels, `#` and `;` in any label, `[*]` handling).
 - a state has no incoming transition
 - the design changes components but has no rollout plan
 - a view is over the node budget
+- a change targets a component that was never declared
+- a story runs through something that is not a component or a persona
+- a component is marked `added`/`modified` but no `changes` entry says what or why
 
 Then open the file and look at it. If a diagram is unreadable, the fix is fewer
 nodes in the JSON, not more zooming.
@@ -134,11 +156,17 @@ and the page falls back to showing the diagram source if the library never loads
 
 ## Publishing and the Ask panel
 
-- **Local / attachment**: `--format standalone` (default) writes a complete document.
+The Ask panel sits in the left rail, under the section list, and answers from the
+**design document** shipped inside the page plus the structured summary. Three
+backends, in order of what is available:
+
 - **Claude Artifact**: `--format artifact` writes title + style + body only. Publish
-  it with `capabilities: {sample: {}}` and the Ask panel goes **live** — the reader
-  asks questions and Claude answers grounded in the embedded design summary. Without
-  that capability the panel degrades to a copyable, fully-grounded prompt.
+  with `capabilities: {sample: {}}` and the panel answers live in the artifact.
+- **Your machine**: `ask_server.py design-explorer.html` serves the page on
+  localhost and forwards each question to `claude -p` or `codex exec` (auto-detected,
+  or `--agent` / `--cmd`). The page finds the bridge itself and switches the pill to
+  the agent's name.
+- **Neither**: the panel composes the same fully-grounded prompt with a copy button.
 
 See `reference/publishing.md`.
 

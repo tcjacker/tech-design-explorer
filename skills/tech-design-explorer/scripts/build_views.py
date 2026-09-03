@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from svg_views import swimlane  # noqa: E402
 from _common import (  # noqa: E402
-    IdFactory, VIEW_TITLES, UI_ZH, detect_lang, esc, known_names, normalize, norm_key,
+    IdFactory, VIEW_ORDER, VIEW_TITLES, UI_ZH, detect_lang, esc, known_names, normalize, norm_key,
     read_json, slug, wrap_label, write_json, write_text,
 )
 
@@ -28,6 +29,14 @@ NODE_BUDGET = 12
 
 # Diagram titles and captions, English inline / Chinese looked up by key.
 TEXT_ZH = {
+    "story.caption": "这个故事在系统里怎么走：一行一个参与方，一列一步。",
+    "story.noflow": "还没有画出流转路径的用户故事",
+    "change.before.title": "现状",
+    "change.before.caption": "改动之前系统就长这样。",
+    "change.delta.title": "本次改动",
+    "change.delta.caption": "带标注的是本次动到的部分；灰色的这次不碰。",
+    "change.after.title": "改造后",
+    "change.after.caption": "这次改动落地之后的系统。",
     "overview.title": "端到端的正常路径",
     "overview.caption": "对系统最短的一句描述：谁调用谁，才能走完一次成功的流程。",
     "arch.title": "组件与职责",
@@ -168,38 +177,181 @@ class ViewBuilder:
             "story_mode": "edge" if story else "",
         }]
 
+    def _graph(self, comps, conns, ids, class_of, tag_of=None) -> List[str]:
+        """A grouped component graph. Shared by the architecture and change views."""
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for c in comps:
+            groups.setdefault(c.get("group") or "", []).append(c)
+        lines, classes = ["flowchart TB"], []
+        for group, members in groups.items():
+            indent = "    "
+            if group:
+                lines.append(f'    subgraph grp_{slug(group, "g")}["{esc(group, 40)}"]')
+                lines.append("    direction TB")
+                indent = "        "
+            for c in members:
+                # a marker at the *start* of a label is parsed as a markdown list by
+                # mermaid, so the change state goes underneath the name instead
+                label = wrap_label(c["name"])
+                sub = [x for x in (tag_of(c) if tag_of else "", c.get("tech", "")) if x]
+                if sub:
+                    label += f'<br/><small>{esc(" · ".join(sub), 30)}</small>'
+                shape_open, shape_close = SHAPES.get(c.get("kind", "service"), ('["', '"]'))
+                lines.append(f'{indent}{ids.get(c["name"])}{shape_open}{label}{shape_close}')
+                classes.append(f'    class {ids.get(c["name"])} {class_of(c)};')
+            if group:
+                lines.append("    end")
+        for cn in conns:
+            if not ids.known(cn["from"]) or not ids.known(cn["to"]):
+                continue
+            arrow = {"async": "-.->", "data": "==>"}.get(cn.get("kind"), "-->")
+            label = f'|"{esc(cn["label"], 30)}"|' if cn.get("label") else ""
+            lines.append(f'    {ids.get(cn["from"])} {arrow}{label} {ids.get(cn["to"])}')
+        lines.append(CLASSDEFS)
+        lines.extend(classes)
+        return lines
+
+    # ------------------------------------------------------------------
+    def change_impact(self) -> List[Dict[str, str]]:
+        """Today, the delta, and the result — the three pictures a reviewer wants."""
+        comps = self.s.get("components") or []
+        conns = self.s.get("connections") or []
+        changes = self.s.get("changes") or []
+        touched = [c for c in comps if c.get("change") != "existing"]
+        if not touched and not changes and not (self.s.get("current_state") or {}).get("summary"):
+            return []
+        if not touched and not any(c.get("change") != "existing" for c in conns):
+            # the design says what changes in prose but never marks a component
+            self.check("info", "change_impact",
+                       "no component carries a `change` status — the before/after views fall back "
+                       "to the change list alone")
+
+        def subset(states):
+            keep = [c for c in comps if c.get("change", "existing") in states]
+            names = {norm_key(c["name"]) for c in keep}
+            edges = [cn for cn in conns
+                     if cn.get("change", "existing") in states
+                     and norm_key(cn["from"]) in names and norm_key(cn["to"]) in names]
+            return keep, edges
+
+        out = []
+        before_comps, before_conns = subset({"existing", "modified", "removed"})
+        after_comps, after_conns = subset({"existing", "modified", "added"})
+        if before_comps:
+            ids = IdFactory("b")
+            out.append({
+                "id": "change-before",
+                "title": self.t("change.before.title", "Before — today"),
+                "caption": (self.s.get("current_state") or {}).get("summary") or
+                           self.t("change.before.caption", "The system as it stands before this change."),
+                "mermaid": "\n".join(self._graph(before_comps, before_conns, ids,
+                                                 lambda c: c.get("kind", "service"))),
+            })
+        if touched or any(cn.get("change", "existing") != "existing" for cn in conns):
+            ids = IdFactory("d")
+            tag = {"added": self.t("ui.added", "added"),
+                   "modified": self.t("ui.modified", "modified"),
+                   "removed": self.t("ui.removed", "removed")}
+            out.append({
+                "id": "change-delta",
+                "title": self.t("change.delta.title", "The change"),
+                "caption": self.t("change.delta.caption",
+                                  "+ added, ~ modified, − removed. Grey is untouched by this design."),
+                "mermaid": "\n".join(self._graph(
+                    comps, conns, ids,
+                    lambda c: {"added": "success", "modified": "decision",
+                               "removed": "failure"}.get(c.get("change"), "external"),
+                    lambda c: tag.get(c.get("change"), ""))),
+            })
+        if after_comps:
+            ids = IdFactory("a2")
+            out.append({
+                "id": "change-after",
+                "title": self.t("change.after.title", "After — this design"),
+                "caption": self.t("change.after.caption", "The system once this change has landed."),
+                "mermaid": "\n".join(self._graph(after_comps, after_conns, ids,
+                                                 lambda c: c.get("kind", "service"))),
+            })
+
+        names = {norm_key(c["name"]) for c in comps} | {norm_key(e["name"]) for e in self.s.get("entities", [])}
+        for ch in changes:
+            if ch["kind"] == "component" and norm_key(ch["target"]) not in names:
+                self.check("warn", "change_impact",
+                           f'change targets "{ch["target"]}", which is not a declared component')
+        noted = {norm_key(ch["target"]) for ch in changes}
+        for c in touched:
+            if norm_key(c["name"]) not in noted:
+                self.check("info", "change_impact",
+                           f'"{c["name"]}" is marked {c["change"]} but has no entry in `changes` — '
+                           f"say what changes about it and why")
+        return out
+
+    def story_flow(self) -> List[Dict[str, Any]]:
+        """Each user story as a walk through the system: lanes × steps."""
+        stories = self.s.get("user_stories") or []
+        if not stories:
+            return []
+        meta: Dict[str, Dict[str, str]] = {}
+        for c in self.s.get("components", []):
+            meta[norm_key(c["name"])] = {"kind": c.get("kind", "service"),
+                                         "role": c.get("responsibility", ""),
+                                         "change": c.get("change", "existing")}
+        for p in self.s.get("personas", []):
+            meta.setdefault(norm_key(p["name"]), {"kind": "actor", "role": p.get("role", "")})
+        flows = {norm_key(f["name"]): f for f in self.s.get("runtime_flows", [])}
+
+        out, missing = [], []
+        for i, story in enumerate(stories):
+            steps = list(story.get("flow") or [])
+            if not steps and story.get("flow_ref"):
+                ref = flows.get(norm_key(story["flow_ref"]))
+                if ref:
+                    steps = [{"component": st["to"] or st["from"], "action": st["action"],
+                              "outcome": st.get("note", ""), "kind": "step"} for st in ref["steps"]]
+                else:
+                    self.check("warn", "story_flow",
+                               f'story "{story["i_want"][:40]}" references flow '
+                               f'"{story["flow_ref"]}", which does not exist')
+            if not steps:
+                missing.append(story)
+                continue
+            for st in steps:
+                st.setdefault("change", meta.get(norm_key(st.get("component", "")), {}).get("change", ""))
+                if st.get("component") and norm_key(st["component"]) not in meta:
+                    self.check("warn", "story_flow",
+                               f'story step runs through "{st["component"]}", which is not a '
+                               f"declared component or persona")
+            title = story.get("i_want") or f"Story {i + 1}"
+            if story.get("as_a"):
+                title = f'{story["as_a"]} · {title}'
+            out.append({
+                "id": f'story-{slug(story.get("id") or str(i), "s")}',
+                "title": title,
+                "caption": story.get("so_that") or self.t(
+                    "story.caption",
+                    "How this story moves through the system: one lane per participant, one column "
+                    "per step."),
+                "svg": swimlane(steps, uid=slug(story.get("id") or str(i), "s"), lanes_meta=meta,
+                                col_label=("步骤" if self.lang == "zh" else "Step")),
+                "story_mode": "swim",
+                "steps": [{"n": n + 1, "from": st.get("component", ""), "to": "",
+                           "action": st.get("action", ""), "note": st.get("outcome", "")}
+                          for n, st in enumerate(steps)],
+            })
+        if missing and out:
+            self.check("info", "story_flow",
+                       f"{len(missing)} user story/stories have no `flow` — add one so the reader "
+                       f"can see where they run")
+        return out
+
     def architecture(self) -> List[Dict[str, str]]:
         comps = self.s.get("components") or []
         if not comps:
             return []
         ids = IdFactory("a")
-        groups: Dict[str, List[Dict[str, Any]]] = {}
-        for c in comps:
-            groups.setdefault(c.get("group") or "", []).append(c)
-        lines = ["flowchart TB"]
-        classes = []
-        for group, members in groups.items():
-            indent = "    "
-            if group:
-                lines.append(f'    subgraph {slug(group, "g")}["{esc(group, 40)}"]')
-                lines.append("    direction TB")
-                indent = "        "
-            for c in members:
-                label = c["name"]
-                if c.get("tech"):
-                    label = f'{c["name"]}<br/><small>{esc(c["tech"], 28)}</small>'
-                    node = f'{ids.get(c["name"])}["{label}"]'
-                else:
-                    node = self.node(ids, c["name"])
-                lines.append(indent + node)
-                classes.append(f'    class {ids.get(c["name"])} {c.get("kind", "service")};')
-            if group:
-                lines.append("    end")
-
-        conns = self.s.get("connections") or []
+        conns = list(self.s.get("connections") or [])
         if not conns:
             seen = set()
-            flow = self.primary_flow()
             for f in self.s.get("runtime_flows", []):
                 for step in f["steps"]:
                     if step["from"] and step["to"]:
@@ -208,20 +360,16 @@ class ViewBuilder:
                             seen.add(key)
                             conns.append({"from": step["from"], "to": step["to"],
                                           "label": "", "kind": "sync"})
-            if conns and flow:
+            if conns:
                 self.check("info", "architecture",
                            "no explicit `connections` — edges were inferred from the runtime flow")
         for c in conns:
-            if not ids.known(c["from"]) or not ids.known(c["to"]):
+            if not any(norm_key(x["name"]) == norm_key(c["from"]) for x in comps) or \
+               not any(norm_key(x["name"]) == norm_key(c["to"]) for x in comps):
                 self.check("warn", "architecture",
                            f'connection {c["from"]} → {c["to"]} references a component that is not '
                            f"declared in `components`")
-                continue
-            arrow = {"async": "-.->", "data": "==>"}.get(c.get("kind"), "-->")
-            label = f'|"{esc(c["label"], 30)}"|' if c.get("label") else ""
-            lines.append(f'    {ids.get(c["from"])} {arrow}{label} {ids.get(c["to"])}')
-        lines.append(CLASSDEFS)
-        lines.extend(classes)
+        lines = self._graph(comps, conns, ids, lambda c: c.get("kind", "service"))
         self.budget("architecture", len(comps))
 
         referenced = {norm_key(c["from"]) for c in conns} | {norm_key(c["to"]) for c in conns}
@@ -489,8 +637,7 @@ class ViewBuilder:
     # -- driver ----------------------------------------------------------
     def build(self) -> List[Dict[str, Any]]:
         views = []
-        for key in ("overview", "architecture", "sequence", "state_machine",
-                    "data_model", "failure_paths", "rollout_plan"):
+        for key in VIEW_ORDER:
             diagrams = getattr(self, key)()
             override = self.s.get("views", {}).get(key)
             if override:
@@ -561,7 +708,10 @@ def main() -> int:
     out = Path(args.out_dir)
     for view in bundle["views"]:
         for d in view["diagrams"]:
-            write_text(out / f'{d["id"]}.mmd', d["mermaid"] + "\n")
+            if d.get("mermaid"):
+                write_text(out / f'{d["id"]}.mmd', d["mermaid"] + "\n")
+            elif d.get("svg"):
+                write_text(out / f'{d["id"]}.svg', d["svg"] + "\n")
     if args.views_json:
         write_json(args.views_json, bundle)
     if not args.quiet:

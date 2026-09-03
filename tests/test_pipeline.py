@@ -18,6 +18,7 @@ import build_views  # noqa: E402
 import export_bundle  # noqa: E402
 import parse_design  # noqa: E402
 import render_html  # noqa: E402
+import svg_views  # noqa: E402
 
 DOC = ROOT / "examples" / "sample_design.md"
 SUMMARY = ROOT / "examples" / "sample_design-summary.json"
@@ -184,6 +185,129 @@ class TestRender(unittest.TestCase):
         self.assertIn('"mermaid_urls":[]', html.replace(", ", ",").replace('"mermaid_urls": []', '"mermaid_urls":[]'))
 
 
+class TestChangeImpact(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = build_views.build(json.loads(SUMMARY.read_text(encoding="utf-8")))
+        cls.view = [v for v in cls.bundle["views"] if v["key"] == "change_impact"][0]
+
+    def test_before_delta_after_are_three_separate_pictures(self):
+        self.assertEqual([d["id"] for d in self.view["diagrams"]],
+                         ["change-before", "change-delta", "change-after"])
+
+    def test_before_omits_what_this_design_adds(self):
+        before = [d for d in self.view["diagrams"] if d["id"] == "change-before"][0]["mermaid"]
+        self.assertNotIn("Backend_FSM", before)       # added by this design
+        self.assertIn("Frontend_FSM", before)         # exists today, modified
+
+    def test_after_omits_what_this_design_removes(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        summary["components"].append({"name": "Legacy Path", "change": "removed",
+                                      "responsibility": "the old way"})
+        views = build_views.build(summary)["views"]
+        change = [v for v in views if v["key"] == "change_impact"][0]
+        after = [d for d in change["diagrams"] if d["id"] == "change-after"][0]["mermaid"]
+        before = [d for d in change["diagrams"] if d["id"] == "change-before"][0]["mermaid"]
+        self.assertIn("Legacy_Path", before)
+        self.assertNotIn("Legacy_Path", after)
+
+    def test_change_state_never_starts_a_label(self):
+        # a leading +/-/~ makes mermaid parse the label as a markdown list
+        delta = [d for d in self.view["diagrams"] if d["id"] == "change-delta"][0]["mermaid"]
+        for line in delta.splitlines():
+            label = line.strip()
+            if '["' in label:
+                self.assertNotRegex(label.split('["', 1)[1], r"^[-+~*]\s")
+        self.assertIn("<small>added</small>", delta)
+
+    def test_the_view_is_skipped_when_nothing_changes(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        for c in summary["components"]:
+            c.pop("change", None)
+        summary.pop("changes"), summary.pop("current_state")
+        keys = [v["key"] for v in build_views.build(summary)["views"]]
+        self.assertNotIn("change_impact", keys)
+
+    def test_a_change_naming_an_unknown_component_is_flagged(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        summary["changes"].append({"target": "Ghost Service", "type": "added", "what": "?"})
+        checks = build_views.build(summary)["checks"]
+        self.assertTrue(any("Ghost Service" in c["message"] and c["level"] == "warn" for c in checks))
+
+
+class TestStoryFlow(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bundle = build_views.build(json.loads(SUMMARY.read_text(encoding="utf-8")))
+        cls.view = [v for v in cls.bundle["views"] if v["key"] == "story_flow"][0]
+
+    def test_one_swimlane_per_story(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        self.assertEqual(len(self.view["diagrams"]), len(summary["user_stories"]))
+        for d in self.view["diagrams"]:
+            self.assertTrue(d["svg"].startswith("<svg"))
+            self.assertNotIn("mermaid", d)
+            self.assertEqual(d["story_mode"], "swim")
+
+    def test_every_step_is_addressable_by_the_walkthrough(self):
+        d = self.view["diagrams"][0]
+        self.assertEqual(d["svg"].count('class="swim-step'), len(d["steps"]))
+        self.assertIn('data-step="0"', d["svg"])
+
+    def test_a_lane_exists_for_each_distinct_participant(self):
+        d = self.view["diagrams"][0]
+        lanes = {s["from"] for s in d["steps"]}
+        self.assertEqual(d["svg"].count('class="rail"'), len(lanes))
+
+    def test_a_story_can_reuse_a_declared_runtime_flow(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        summary["user_stories"] = [{"as_a": "player", "i_want": "x",
+                                    "flow_ref": summary["runtime_flows"][0]["name"]}]
+        view = [v for v in build_views.build(summary)["views"] if v["key"] == "story_flow"][0]
+        self.assertEqual(len(view["diagrams"][0]["steps"]),
+                         len(summary["runtime_flows"][0]["steps"]))
+
+    def test_a_step_through_an_undeclared_component_is_flagged(self):
+        summary = json.loads(SUMMARY.read_text(encoding="utf-8"))
+        summary["user_stories"][0]["flow"] = [{"component": "Ghost", "action": "do"}]
+        checks = build_views.build(summary)["checks"]
+        self.assertTrue(any("Ghost" in c["message"] and c["level"] == "warn" for c in checks))
+
+    def test_labels_wrap_instead_of_overflowing_their_card(self):
+        lines = svg_views.fit_lines("a fairly long step label that will not fit on one line", 120, 12.5, 2)
+        self.assertLessEqual(len(lines), 2)
+        self.assertTrue(lines[-1].endswith("…"))
+        for line in lines:
+            self.assertLessEqual(svg_views.text_width(line, 12.5), 130)
+
+    def test_cjk_wraps_by_character(self):
+        lines = svg_views.fit_lines("会话服务写入活跃状态并返回结果给网关", 100, 12.5, 3)
+        self.assertGreater(len(lines), 1)
+        self.assertTrue(all(svg_views.text_width(x, 12.5) <= 105 for x in lines))
+
+
+class TestDocumentContext(unittest.TestCase):
+    def test_the_document_ships_with_the_page(self):
+        summary = render_html.attach_document(
+            json.loads(SUMMARY.read_text(encoding="utf-8")), str(DOC))
+        self.assertTrue(summary["document_sections"])
+        self.assertIn("summary", summary["source_map"])
+        out = render_html.render(summary, mermaid_urls=[])["_html"]
+        self.assertIn("The simulation advances one in-world hour", out)
+
+    def test_each_view_points_at_the_section_it_came_from(self):
+        draft = parse_design.parse(DOC.read_text(encoding="utf-8"), source=str(DOC))
+        by_id = {s["id"]: s for s in draft["document_sections"]}
+        for view, sec_id in draft["source_map"].items():
+            self.assertIn(sec_id, by_id, f"{view} points at a section that does not exist")
+        self.assertIn("Architecture", by_id[draft["source_map"]["architecture"]]["heading"])
+
+    def test_a_summary_without_a_document_still_renders(self):
+        out = render_html.render(json.loads(SUMMARY.read_text(encoding="utf-8")),
+                                 mermaid_urls=[])["_html"]
+        self.assertIn("design-payload", out)
+
+
 class TestLanguage(unittest.TestCase):
     CJK = {
         "title": "会话缓存迁移方案",
@@ -226,8 +350,8 @@ class TestBundle(unittest.TestCase):
             result = export_bundle.bundle(json.loads(SUMMARY.read_text(encoding="utf-8")), out)
             self.assertTrue((out / "design-explorer.html").exists())
             self.assertTrue((out / "README.md").exists())
-            mmds = list((out / "assets").glob("*.mmd"))
-            self.assertEqual(len(mmds), sum(len(v["diagrams"]) for v in result["views"]))
+            sources = list((out / "assets").glob("*.mmd")) + list((out / "assets").glob("*.svg"))
+            self.assertEqual(len(sources), sum(len(v["diagrams"]) for v in result["views"]))
             written = json.loads((out / "design-summary.json").read_text(encoding="utf-8"))
             self.assertFalse([k for k in written if k.startswith("_")], "internal keys leaked")
 

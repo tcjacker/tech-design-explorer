@@ -5,9 +5,15 @@ not one architecture diagram, but the whole design as something a reviewer can
 browse in three to five minutes.
 
 ```
-design.md  ──▶  design-summary.json  ──▶  8 focused views  ──▶  design-explorer.html
-             (the agent reads)          (generated)            (one self-contained file)
+design.md  ──▶  design-summary.json  ──▶  focused views  ──▶  design-explorer.html
+    │        (the agent reads)          (generated)          (one self-contained file)
+    └──────────────── the document ships inside the page ────────────────┘
 ```
+
+The document is the payload; the HTML is how it gets read. The page carries the
+design doc itself, links every view back to the section it came from, and answers
+questions from it — in a published artifact via Claude, or on your machine via
+Claude Code / Codex.
 
 ## What comes out
 
@@ -18,6 +24,8 @@ One HTML file with:
 | Summary | Why this exists, goals, non-goals, constraints, success metrics |
 | Users and stories | Who this is for and what they need |
 | Overview | The happy path end to end, with a step-by-step walkthrough |
+| Current State and Change | What exists today, what this design adds / changes / removes — before, delta, after |
+| Story Flow | Each user story as a swimlane: one lane per participant, one column per step |
 | Architecture | Components, boundaries, responsibilities |
 | Runtime Flow | A sequence diagram per flow, with an auto-playing walkthrough |
 | State Model | The lifecycle of the core object, dead ends included |
@@ -27,11 +35,11 @@ One HTML file with:
 | Design decisions | ADR cards: alternatives, pros, cons, what was chosen and why |
 | Risks / Open questions | What could go wrong, and what the author still owes |
 | Review checks | Automated consistency findings across the views |
+| Source document | The design doc itself, rendered — and reachable from every view |
 
 Plus: sticky nav with scroll-spy, text filter, light/dark, focus-one-section,
 per-diagram zoom / pan / fullscreen / copy-mermaid / SVG + PNG export, and an
-**Ask** panel that answers questions about the design from the summary embedded in
-the page.
+**Ask** panel in the left rail that answers from the document shipped in the page.
 
 ## Install
 
@@ -55,7 +63,8 @@ S=skills/tech-design-explorer/scripts
 
 python3 $S/parse_design.py  design.md -o design-summary.draft.json   # scaffold + gap list
 cp design-summary.draft.json design-summary.json                     # then edit it
-python3 $S/render_html.py   design-summary.json -o design-explorer.html
+python3 $S/render_html.py   design-summary.json --document design.md -o design-explorer.html
+python3 $S/ask_server.py    design-explorer.html --open      # Claude Code / Codex answers in-page
 ```
 
 The scaffold is only a scaffold: it classifies sections and pulls out bullets,
@@ -91,6 +100,8 @@ skills/tech-design-explorer/
 │   ├── views.md             which view for which semantic + mermaid pitfalls
 │   └── publishing.md        local / offline / artifact / bundle
 ├── scripts/                 parse → build → render → bundle (stdlib only)
+│   ├── svg_views.py         the hand-laid swimlane, drawn on an explicit grid
+│   └── ask_server.py        localhost bridge to Claude Code / Codex
 └── templates/explorer.html  the page: CSS + runtime, payload injected at render
 commands/design-explore.md   /design-explore slash command
 examples/                    a full worked design doc and its summary
@@ -111,7 +122,7 @@ tests/                       pipeline tests + optional real-mermaid validation
 ## Development
 
 ```sh
-python3 -m unittest discover -s tests -v          # 22 pipeline tests, stdlib only
+python3 -m unittest discover -s tests -v          # 42 pipeline tests, stdlib only
 
 # optional: parse every generated diagram with the real mermaid parser
 npm i mermaid playwright
@@ -124,7 +135,8 @@ node tests/validate_mermaid.mjs /tmp/bundle/assets
 
 - **v1 (here)** — parse → summary → 8 views → interactive explorer; ADR cards;
   walkthrough; consistency checks; artifact publishing with a live Ask panel.
-- **v2** — diff two versions of a spec; filter a flow to the happy or failure path
-  only; click a node to jump to the section that explains it.
-- **v3** — Excalidraw-style rendering for the whiteboard views; link diagram nodes
-  to source files in the repository.
+- **v2 (here)** — the document ships inside the page and answers questions; current
+  state vs. this increment as before / delta / after; user stories drawn as
+  swimlanes; a local Claude Code / Codex bridge.
+- **next** — diff two versions of a spec; filter a flow to the happy or failure path
+  only; link diagram nodes to source files in the repository.

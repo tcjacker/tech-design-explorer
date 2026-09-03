@@ -20,7 +20,9 @@ SCHEMA_VERSION = "1.0"
 # Sections rendered by the explorer, in review order.
 VIEW_ORDER = [
     "overview",
+    "change_impact",
     "architecture",
+    "story_flow",
     "sequence",
     "state_machine",
     "data_model",
@@ -30,7 +32,9 @@ VIEW_ORDER = [
 
 VIEW_TITLES = {
     "overview": "Overview",
+    "change_impact": "Current State and Change",
     "architecture": "Architecture",
+    "story_flow": "Story Flow",
     "sequence": "Runtime Flow",
     "state_machine": "State Model",
     "data_model": "Data Model",
@@ -41,7 +45,9 @@ VIEW_TITLES = {
 # Localisation. English is the default and lives inline at every call site as the
 # fallback, so a missing key degrades to English instead of an empty label.
 UI_ZH = {
-    "view.overview": "总览", "view.architecture": "架构", "view.sequence": "运行时流程",
+    "view.overview": "总览", "view.change_impact": "现状与本次改动",
+    "view.architecture": "架构", "view.story_flow": "用户故事流转",
+    "view.sequence": "运行时流程",
     "view.state_machine": "状态机", "view.data_model": "数据模型",
     "view.failure_paths": "失败路径", "view.rollout_plan": "实施计划",
     "sec.summary": "概要", "sec.stories": "用户与故事", "sec.decisions": "设计决策",
@@ -66,7 +72,7 @@ UI_ZH = {
     "ask.title": "就这份方案提问", "ask.live": "在线", "ask.offline": "离线",
     "ask.placeholder": "例如：CAS 写入连续失败两次会怎样？",
     "ask.send": "发送", "ask.close": "关闭",
-    "ask.intro": "关于这份方案随便问。回答基于页面内嵌的结构化方案摘要，而不是整篇文档。",
+    "ask.intro": "关于这份方案随便问。回答基于随页面一起打包的方案原文，以及生成这些视图的结构化摘要。",
     "ask.thinking": "思考中…",
     "ask.noModel": "本页未连接模型。把下面的提示词复制到 Claude Code（或任意助手），它会基于这份方案的摘要作答。",
     "ask.copyPrompt": "复制完整提示词", "ask.copied": "提示词已复制",
@@ -75,6 +81,15 @@ UI_ZH = {
     "toast.mmdCopied": "已复制 mermaid 源码", "toast.clipboard": "浏览器阻止了剪贴板",
     "toast.nothing": "还没有可导出的内容", "toast.pngFailed": "PNG 导出失败，请用 SVG",
     "err.render": "此处无法渲染该图", "err.source": "以下是源码，可粘贴到任意 mermaid 工具中查看。",
+    "sec.document": "方案原文", "ui.source": "原文", "ui.sourceOf": "对应原文章节",
+    "ui.before": "现状", "ui.delta": "改动", "ui.after": "改造后",
+    "ui.added": "新增", "ui.modified": "改动", "ui.removed": "移除", "ui.existing": "沿用",
+    "th.target": "对象", "th.change": "变更", "th.what": "做什么", "th.why": "为什么",
+    "th.files": "涉及位置", "ui.painPoints": "现状痛点", "ui.currentState": "技术现状",
+    "ui.storyLane": "参与方", "ui.storyStep": "步骤", "ui.noStoryFlow": "这个故事还没有画出流转路径",
+    "ask.agent": "本地 agent", "ask.docContext": "已加载方案原文",
+    "ask.answersHere": "正在本机作答",
+    "stat.changes": "处改动",
     "stat.components": "组件", "stat.flows": "流程", "stat.failures": "失败路径",
     "stat.decisions": "决策", "stat.phases": "阶段", "stat.questions": "开放问题",
     "foot.by": "由 tech-design-explorer 生成", "foot.from": "来源",
@@ -276,6 +291,23 @@ def _kind(value: Any, fallback: str = "service") -> str:
     return KIND_ALIASES.get(key, fallback)
 
 
+CHANGE_STATES = ("existing", "added", "modified", "removed")
+CHANGE_ALIASES = {
+    "new": "added", "add": "added", "added": "added", "新增": "added", "新加": "added",
+    "changed": "modified", "modify": "modified", "modified": "modified", "update": "modified",
+    "updated": "modified", "改动": "modified", "修改": "modified", "变更": "modified",
+    "delete": "removed", "deleted": "removed", "removed": "removed", "drop": "removed",
+    "移除": "removed", "删除": "removed", "下线": "removed",
+    "existing": "existing", "unchanged": "existing", "same": "existing",
+    "沿用": "existing", "不变": "existing", "现状": "existing",
+}
+
+
+def _change(value: Any) -> str:
+    key = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(value or "").lower())
+    return CHANGE_ALIASES.get(key, "existing")
+
+
 def _step_from_string(text: str) -> Dict[str, Any]:
     """Parse `Frontend FSM -> Backend FSM: start commit` into a step object."""
     m = re.match(r"^\s*(.+?)\s*(-->|->|=>|→)\s*(.+?)\s*[:：]\s*(.+?)\s*$", text)
@@ -317,11 +349,28 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(s, str):
             stories.append({"as_a": "", "i_want": as_text(s), "so_that": "", "acceptance": []})
             continue
+        flow = []
+        for i, st in enumerate(as_list(s.get("flow"))):
+            if isinstance(st, str):
+                parsed = _step_from_string(st)
+                flow.append({"component": parsed["from"] or parsed["to"],
+                             "action": parsed["action"], "outcome": "", "kind": "step"})
+                continue
+            flow.append({
+                "component": as_text(st.get("component") or st.get("actor") or st.get("lane")),
+                "action": as_text(st.get("action") or st.get("text") or st.get("step")),
+                "outcome": as_text(st.get("outcome") or st.get("note")),
+                "kind": (as_text(st.get("kind")) or "step").lower(),
+            })
         stories.append({
+            "id": as_text(s.get("id")) or f"story-{len(stories) + 1}",
             "as_a": as_text(s.get("as_a") or s.get("persona") or s.get("role")),
             "i_want": as_text(s.get("i_want") or s.get("want") or s.get("story")),
             "so_that": as_text(s.get("so_that") or s.get("value")),
             "acceptance": [as_text(a) for a in as_list(s.get("acceptance") or s.get("acceptance_criteria"))],
+            "flow_ref": as_text(s.get("flow_ref")),
+            "flow": [f for f in flow if f["action"] or f["component"]],
+            "change": _change(s.get("change")),
         })
     d["user_stories"] = [s for s in stories if s["i_want"]]
 
@@ -343,6 +392,7 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
             "tech": as_text(c.get("tech") or c.get("technology")),
             "interfaces": [as_text(i) for i in as_list(c.get("interfaces"))],
             "critical": bool(c.get("critical", False)),
+            "change": _change(c.get("change")),
         })
     d["components"] = components
     by_name = {norm_key(c["name"]): c["id"] for c in components}
@@ -357,6 +407,7 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
             "to": as_text(c.get("to") or c.get("target")),
             "label": as_text(c.get("label") or c.get("action")),
             "kind": (as_text(c.get("kind")) or "sync").lower(),
+            "change": _change(c.get("change")),
         }
         for c in (obj(x, "from") for x in as_list(raw.get("connections")))
         if as_text(c.get("from")) and as_text(c.get("to"))
@@ -568,6 +619,42 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
         for g in (obj(x, "term") for x in as_list(raw.get("glossary")))
         if as_text(g.get("term"))
     ]
+
+    # -- current state and this increment ----------------------------------
+    cs = raw.get("current_state")
+    cs = obj(cs, "summary") if cs is not None else {}
+    d["current_state"] = {
+        "summary": as_text(cs.get("summary") or cs.get("description")),
+        "components": [as_text(c) for c in as_list(cs.get("components")) if as_text(c)],
+        "pain_points": [as_text(c) for c in as_list(cs.get("pain_points") or cs.get("problems"))
+                        if as_text(c)],
+    }
+    d["changes"] = [
+        {
+            "target": as_text(c.get("target") or c.get("name") or c.get("component")),
+            "kind": (as_text(c.get("kind")) or "component").lower(),
+            "type": _change(c.get("type") or c.get("change")),
+            "what": as_text(c.get("what") or c.get("description")),
+            "why": as_text(c.get("why") or c.get("reason")),
+            "files": [as_text(f) for f in as_list(c.get("files") or c.get("where")) if as_text(f)],
+            "risk": (as_text(c.get("risk")) or "").lower(),
+        }
+        for c in (obj(x, "target") for x in as_list(raw.get("changes")))
+        if as_text(c.get("target") or c.get("name") or c.get("component"))
+    ]
+
+    # -- the source document itself ----------------------------------------
+    d["document_sections"] = [
+        {
+            "id": as_text(sec.get("id")) or slug(as_text(sec.get("heading")), "doc"),
+            "heading": as_text(sec.get("heading")),
+            "level": int(sec.get("level") or 2),
+            "text": as_text(sec.get("text")),
+        }
+        for sec in (obj(x, "heading") for x in as_list(raw.get("document_sections")))
+        if as_text(sec.get("text")) or as_text(sec.get("heading"))
+    ]
+    d["source_map"] = {k: as_text(v) for k, v in (raw.get("source_map") or {}).items() if as_text(v)}
 
     # -- diagram overrides supplied by the author --------------------------
     views = raw.get("views") or {}

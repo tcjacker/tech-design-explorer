@@ -10,6 +10,28 @@ of an hour's results. When a commit fails halfway — a plugin hook raises, or t
 database write times out — the frontend is already in the next hour and the two
 views of the world diverge. Operators recover by hand-editing `session_cache`.
 
+## Current state
+
+Today `HourFSM` in `engine/fsm.py` owns both the player-visible hour and the durable
+write. `ScenarioPlugin` hooks are compiled into the engine, and `session_cache` is
+written without a version guard.
+
+- A failed database write leaves the frontend an hour ahead of the stored state
+- Operators recover by hand-editing `session_cache`
+- Scenario rules cannot be changed without an engine release
+- There is no metric that counts failed commits
+
+## What changes in this design
+
+| Component | Change | Why |
+| --- | --- | --- |
+| Backend FSM | New — owns the commit lifecycle | Gives partial failure an explicit state |
+| Hour Commit Service | New — drafts, validates and persists | Separates execution from orchestration |
+| Frontend FSM | Modified — keeps only player progression | The commit concern moves out |
+| Session Store | Modified — CAS version column added | Makes concurrent writes detectable |
+| Event Bus | New — publishes commit outcomes | Operators and metrics need a feed |
+| Legacy commit path | Removed in phase 3 | Replaced by the Backend FSM |
+
 ## Goals
 
 - Separate command orchestration from durable state commit

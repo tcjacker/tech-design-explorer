@@ -25,6 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import as_text, norm_key, write_json  # noqa: E402
 
 SECTION_PATTERNS: List[Tuple[str, List[str]]] = [
+    ("current_state", ["current state", "as-is", "as is", "today", "status quo",
+                       "existing system", "existing implementation",
+                       "现状", "现有", "当前实现", "当前架构", "今天"]),
+    ("changes", ["what changes", "this change", "increment", "delta", "modifications",
+                 "changes in this", "proposed change", "改动", "变更", "增量",
+                 "本次修改", "本次改动", "改造", "要做什么"]),
     ("non_goals", ["non-goal", "non goal", "nongoal", "out of scope", "not in scope",
                    "非目标", "不做", "范围外"]),
     ("goals", ["goal", "objective", "requirement", "目标", "需求"]),
@@ -131,6 +137,21 @@ def tables(text: str) -> List[Dict[str, str]]:
         if len(cells) == len(header):
             rows.append(dict(zip(header, cells)))
     return rows
+
+
+CHANGE_VERBS = [
+    (["新增", "增加", "引入", "add", "introduce", "new "], "added"),
+    (["移除", "删除", "下线", "remove", "delete", "drop "], "removed"),
+    (["改", "调整", "迁移", "modify", "change", "update", "migrate", "refactor"], "modified"),
+]
+
+
+def change_type(text: str) -> str:
+    low = text.lower()
+    for needles, kind in CHANGE_VERBS:
+        if any(n in low for n in needles):
+            return kind
+    return "modified"
 
 
 def strip_md(text: str) -> str:
@@ -287,6 +308,33 @@ def parse(md: str, source: str = "") -> Dict[str, Any]:
             "reason": "",
         })
 
+    # current state and this increment ------------------------------------
+    current_state: Dict[str, Any] = {}
+    for s in grouped.get("current_state", []):
+        items = [strip_md(b) for b in bullets(s["text"])]
+        prose = "\n".join(line for line in s["text"].splitlines()
+                          if not re.match(r"^\s*(?:[-*+]|\d+[.)])\s+", line))
+        body = strip_md(re.sub(r"```.*?```", "", prose, flags=re.S))
+        current_state = {
+            "summary": current_state.get("summary") or body[:600],
+            "pain_points": current_state.get("pain_points", []) + items,
+        }
+    changes = []
+    for s in grouped.get("changes", []):
+        for row in tables(s["text"]):
+            target = (row.get("component") or row.get("target") or row.get("组件")
+                      or row.get("对象") or row.get("模块") or row.get("名称"))
+            if target:
+                what = strip_md(row.get("change") or row.get("what") or row.get("改动")
+                                or row.get("变更") or "")
+                changes.append({"target": strip_md(target), "type": change_type(what),
+                                "what": what, "why": strip_md(row.get("why") or row.get("原因") or "")})
+        for b in bullets(s["text"]):
+            name, rest = split_named(b)
+            text = strip_md(b)
+            changes.append({"target": name or text[:48], "type": change_type(text),
+                            "what": rest or text, "why": ""})
+
     risks = []
     for s in grouped.get("risks", []):
         for row in tables(s["text"]):
@@ -320,8 +368,24 @@ def parse(md: str, source: str = "") -> Dict[str, Any]:
         "open_questions": [{"question": b} for b in bullets_of("open_questions")],
         "metrics": [{"name": split_named(b)[0] or b, "target": split_named(b)[1]}
                     for b in bullets_of("metrics")],
+        "current_state": current_state,
+        "changes": dedupe(changes, "target"),
         "views": collect_mermaid(md),
+        "document_sections": [
+            {"id": f"doc-{i}", "heading": sec["heading"], "level": sec["level"] or 1,
+             "text": sec["text"]}
+            for i, sec in enumerate(sections) if sec["text"].strip() or sec["heading"]
+        ],
+        "source_map": source_map(sections),
     }
+
+    # a change table names components; carry that onto the components themselves so
+    # the before/after views work straight from the document
+    by_change = {norm_key(c["target"]): c["type"] for c in draft["changes"]}
+    for comp in draft["components"]:
+        state = by_change.get(norm_key(comp["name"]))
+        if state:
+            comp["change"] = state
 
     draft["_gaps"] = gaps(draft)
     draft["_source_sections"] = {
@@ -343,6 +407,27 @@ def parse_story(text: str) -> Dict[str, Any]:
     if m:
         return {"as_a": m.group(1), "i_want": m.group(2), "so_that": m.group(3) or "", "acceptance": []}
     return {"as_a": "", "i_want": text, "so_that": "", "acceptance": []}
+
+
+SOURCE_VIEWS = {
+    "background": "summary", "summary": "summary", "goals": "summary",
+    "non_goals": "summary", "constraints": "summary", "metrics": "summary",
+    "user_stories": "story_flow", "current_state": "change_impact", "changes": "change_impact",
+    "components": "architecture", "runtime_flows": "sequence", "states": "state_machine",
+    "entities": "data_model", "failure_paths": "failure_paths",
+    "rollout_phases": "rollout_plan", "decisions": "decisions", "risks": "risks",
+    "open_questions": "questions",
+}
+
+
+def source_map(sections: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Which document section a reader should open behind each view."""
+    out: Dict[str, str] = {}
+    for i, sec in enumerate(sections):
+        view = SOURCE_VIEWS.get(sec["label"])
+        if view and view not in out and sec["text"].strip():
+            out[view] = f"doc-{i}"
+    return out
 
 
 def dedupe(items: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
@@ -378,6 +463,13 @@ def gaps(draft: Dict[str, Any]) -> List[str]:
     for d in draft.get("decisions", []):
         if not d.get("chosen"):
             out.append(f"decisions[{d['title']}]: chosen/reason not extracted")
+    if not draft.get("changes") and not draft.get("current_state"):
+        out.append("current_state/changes: none found — if this design modifies an existing "
+                   "system, describe what it looks like today and mark what this change touches")
+    for story in draft.get("user_stories", []):
+        if not story.get("flow"):
+            out.append(f"user_stories[{story.get('i_want', '')[:40]}]: no `flow` — trace the story "
+                       f"through the components so it can be drawn")
     return out
 
 

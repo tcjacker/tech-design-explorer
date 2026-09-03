@@ -29,6 +29,35 @@ Canonical example: `examples/sample_design-summary.json`.
 }
 ```
 
+## current_state / changes
+
+What the system looks like today, and what this design does to it. Drives the
+before / delta / after views and the change table; omit both and that view is
+skipped (a greenfield design has no "before").
+
+```jsonc
+"current_state": {
+  "summary": "One HourFSM owns both the player-visible hour and the durable write.",
+  "pain_points": ["A failed write leaves the frontend an hour ahead", "Operators hand-edit SQL"]
+},
+"changes": [{
+  "target": "Backend FSM",          // a declared component, entity, or a named process
+  "kind": "component",              // component | connection | entity | process
+  "type": "added",                  // added | modified | removed  (新增/改动/移除 also parse)
+  "what": "New state machine owning PREPARING → COMMITTING → FAILED",
+  "why": "Partial failure needs a state of its own",
+  "files": ["engine/backend_fsm.py"],
+  "risk": "medium"
+}]
+```
+
+Each component and connection also carries its own `"change"`, which is what the
+diagrams colour and label:
+
+```jsonc
+"components": [{ "name": "Backend FSM", "change": "added" }]      // default: "existing"
+```
+
 ## personas / user_stories
 
 Drives the "Users and stories" section. A persona `name` may be used as a `from`
@@ -40,10 +69,21 @@ in a runtime flow.
   "as_a": "operator",
   "i_want": "a failed commit to be visible and retryable",
   "so_that": "I never hand-edit the database",
-  "acceptance": ["Every FAILED commit emits an event", "Retry is one idempotent call"]
+  "acceptance": ["Every FAILED commit emits an event", "Retry is one idempotent call"],
+  "flow": [
+    { "component": "Backend FSM", "action": "Commit lands in FAILED", "outcome": "write rejected" },
+    { "component": "Event Bus",   "action": "Publish the failure with a session id" },
+    { "component": "Operator",    "action": "Retry from the ops view", "outcome": "no SQL needed" }
+  ]
 }]
 ```
 Short form: `"As an operator, I want X, so that Y"` (English or 作为…我希望…以便…) is parsed.
+
+`flow` is what the Story Flow swimlane is drawn from: one lane per `component`, one
+column per step, in order. `component` must be a declared component or persona.
+A story that follows an existing runtime flow can point at it instead:
+`"flow_ref": "Happy path: commit one hour"`. A story with neither is listed but not
+drawn, and the checks say so.
 
 ## components / connections
 
@@ -180,6 +220,20 @@ next step in the list. Short form: a list of strings makes a straight line.
 "open_questions": [{ "question": "Auto-retry or always wait for an operator?", "owner": "Platform", "blocking": true }],
 "glossary": [{ "term": "CAS", "definition": "Compare-and-set write guarded by a version token" }]
 ```
+
+## document_sections / source_map
+
+The design document itself, carried into the page: the reader can open the original
+prose behind any view, read the whole thing in the last section, and every question
+in the Ask panel is answered from it.
+
+```jsonc
+"document_sections": [{ "id": "doc-3", "heading": "Architecture", "level": 2, "text": "…markdown…" }],
+"source_map": { "architecture": "doc-3", "sequence": "doc-4" }
+```
+
+You rarely write these by hand: `parse_design.py` produces both, and
+`render_html.py --document design.md` fills them in at render time.
 
 ## views (escape hatch)
 

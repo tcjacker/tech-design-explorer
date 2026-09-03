@@ -26,6 +26,7 @@ from typing import Any, Dict, List
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import read_json, strings, write_text  # noqa: E402
 from build_views import build  # noqa: E402
+from parse_design import parse  # noqa: E402
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "explorer.html"
 
@@ -45,6 +46,19 @@ def payload_script(bundle: Dict[str, Any]) -> str:
     text = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
     # keep the JSON from terminating the surrounding <script> element
     return text.replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
+def attach_document(summary: Dict[str, Any], document: str) -> Dict[str, Any]:
+    """Carry the source document into the page: the diagrams summarise it, they do
+    not replace it, and every question a reader asks is answered from it."""
+    draft = parse(Path(document).read_text(encoding="utf-8"), source=document)
+    summary = dict(summary)
+    summary.setdefault("source_document", document)
+    if not summary.get("document_sections"):
+        summary["document_sections"] = draft["document_sections"]
+    if not summary.get("source_map"):
+        summary["source_map"] = draft["source_map"]
+    return summary
 
 
 def render(summary: Dict[str, Any], *, mermaid_urls: List[str], inline_mermaid: str = "",
@@ -79,6 +93,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("summary", help="design-summary.json")
     ap.add_argument("-o", "--out", default="design-explorer.html")
+    ap.add_argument("--document", default="",
+                    help="the design doc this summary came from; its text ships with the page")
     ap.add_argument("--format", choices=["standalone", "artifact"], default="standalone")
     ap.add_argument("--mermaid-url", action="append", default=[],
                     help="override the mermaid CDN URLs (repeatable, tried in order)")
@@ -90,7 +106,10 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
-    bundle = render(read_json(args.summary),
+    summary = read_json(args.summary)
+    if args.document:
+        summary = attach_document(summary, args.document)
+    bundle = render(summary,
                     mermaid_urls=args.mermaid_url or MERMAID_URLS,
                     inline_mermaid=args.inline_mermaid,
                     fmt=args.format,

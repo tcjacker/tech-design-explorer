@@ -3,7 +3,9 @@
   "title": "Hour Commit Decoupling",
   "subtitle": "Splitting player-facing progression from durable hour commit",
   "status": "Draft",
-  "authors": ["Platform Team"],
+  "authors": [
+    "Platform Team"
+  ],
   "date": "2026-08-20",
   "source_document": "examples/sample_design.md",
   "summary": "Today one state machine owns both the player-visible hour and its durable commit, so a half-failed commit leaves the two out of sync. We split it into a Frontend FSM that owns progression and a Backend FSM that owns the commit lifecycle, with an explicit FAILED state and a retry path.",
@@ -20,48 +22,234 @@
     "Multi-region replication"
   ],
   "personas": [
-    {"name": "Player", "role": "End user", "need": "An hour that advances without losing state"},
-    {"name": "Operator", "role": "On-call engineer", "need": "See and retry failed commits without touching the database"},
-    {"name": "Scenario Author", "role": "Content engineer", "need": "Hook the commit lifecycle from a plugin"}
+    {
+      "name": "Player",
+      "role": "End user",
+      "need": "An hour that advances without losing state"
+    },
+    {
+      "name": "Operator",
+      "role": "On-call engineer",
+      "need": "See and retry failed commits without touching the database"
+    },
+    {
+      "name": "Scenario Author",
+      "role": "Content engineer",
+      "need": "Hook the commit lifecycle from a plugin"
+    }
   ],
   "user_stories": [
     {
       "as_a": "player",
       "i_want": "an hour to advance without losing my chat log",
       "so_that": "a transient backend error is invisible to me",
-      "acceptance": ["A failed commit never advances the visible hour", "The chat log survives a retry"]
+      "acceptance": [
+        "A failed commit never advances the visible hour",
+        "The chat log survives a retry"
+      ],
+      "flow": [
+        {
+          "component": "Web Client",
+          "action": "Advance the hour",
+          "outcome": "one click"
+        },
+        {
+          "component": "API Gateway",
+          "action": "Validate and route the command"
+        },
+        {
+          "component": "Frontend FSM",
+          "action": "Check the player may advance",
+          "outcome": "progression state only"
+        },
+        {
+          "component": "Backend FSM",
+          "action": "Run the commit lifecycle",
+          "outcome": "PREPARING → COMMITTING"
+        },
+        {
+          "component": "Session Store",
+          "action": "CAS write of the hour",
+          "outcome": "version guarded"
+        },
+        {
+          "component": "Frontend FSM",
+          "action": "Advance only after the ack",
+          "outcome": "chat log intact"
+        },
+        {
+          "component": "Web Client",
+          "action": "Render the next hour"
+        }
+      ]
     },
     {
       "as_a": "operator",
       "i_want": "a failed commit to be visible and retryable",
       "so_that": "I never hand-edit the database",
-      "acceptance": ["Every FAILED commit emits an event with a session id", "Retry is a single idempotent call"]
+      "acceptance": [
+        "Every FAILED commit emits an event with a session id",
+        "Retry is a single idempotent call"
+      ],
+      "flow": [
+        {
+          "component": "Backend FSM",
+          "action": "Commit lands in FAILED",
+          "outcome": "write rejected"
+        },
+        {
+          "component": "Event Bus",
+          "action": "Publish the failure with a session id"
+        },
+        {
+          "component": "Operator",
+          "action": "See the failed commit in the ops view",
+          "outcome": "no SQL needed"
+        },
+        {
+          "component": "Backend FSM",
+          "action": "Operator triggers one idempotent retry"
+        },
+        {
+          "component": "Session Store",
+          "action": "Re-draft and CAS write against the fresh version"
+        }
+      ]
     },
     {
       "as_a": "scenario author",
       "i_want": "to run code before and after an hour commit",
       "so_that": "scenario rules stay out of the engine",
-      "acceptance": ["Hooks run inside a 200ms budget", "A hook failure fails the commit loudly"]
+      "acceptance": [
+        "Hooks run inside a 200ms budget",
+        "A hook failure fails the commit loudly"
+      ],
+      "flow": [
+        {
+          "component": "Scenario Plugin",
+          "action": "Register before_hour_tick / after_hour_tick"
+        },
+        {
+          "component": "Backend FSM",
+          "action": "Call the hook inside a 200ms budget",
+          "outcome": "hard cancel on timeout"
+        },
+        {
+          "component": "Hour Commit Service",
+          "action": "Apply the scenario's veto or edits"
+        },
+        {
+          "component": "Event Bus",
+          "action": "Publish the outcome the hook produced"
+        }
+      ]
     }
   ],
   "components": [
-    {"name": "Web Client", "group": "Client", "kind": "ui", "responsibility": "Renders the hour and submits player commands", "tech": "React"},
-    {"name": "API Gateway", "group": "Client", "kind": "service", "responsibility": "Auth, rate limiting, request routing"},
-    {"name": "Frontend FSM", "group": "Engine", "kind": "service", "responsibility": "Owns player-visible progression state", "critical": true},
-    {"name": "Backend FSM", "group": "Engine", "kind": "service", "responsibility": "Owns the hour commit lifecycle and its failure states", "critical": true},
-    {"name": "Hour Commit Service", "group": "Engine", "kind": "service", "responsibility": "Drafts, validates and persists one hour of results"},
-    {"name": "Scenario Plugin", "group": "Engine", "kind": "external", "responsibility": "Scenario-specific hooks around the commit"},
-    {"name": "Session Store", "group": "Data", "kind": "store", "responsibility": "Session and hour state with CAS versioning", "tech": "PostgreSQL"},
-    {"name": "Event Bus", "group": "Data", "kind": "queue", "responsibility": "Publishes commit outcomes to observers"}
+    {
+      "name": "Web Client",
+      "group": "Client",
+      "kind": "ui",
+      "responsibility": "Renders the hour and submits player commands",
+      "tech": "React",
+      "change": "existing"
+    },
+    {
+      "name": "API Gateway",
+      "group": "Client",
+      "kind": "service",
+      "responsibility": "Auth, rate limiting, request routing",
+      "change": "existing"
+    },
+    {
+      "name": "Frontend FSM",
+      "group": "Engine",
+      "kind": "service",
+      "responsibility": "Owns player-visible progression state",
+      "critical": true,
+      "change": "modified"
+    },
+    {
+      "name": "Backend FSM",
+      "group": "Engine",
+      "kind": "service",
+      "responsibility": "Owns the hour commit lifecycle and its failure states",
+      "critical": true,
+      "change": "added"
+    },
+    {
+      "name": "Hour Commit Service",
+      "group": "Engine",
+      "kind": "service",
+      "responsibility": "Drafts, validates and persists one hour of results",
+      "change": "added"
+    },
+    {
+      "name": "Scenario Plugin",
+      "group": "Engine",
+      "kind": "external",
+      "responsibility": "Scenario-specific hooks around the commit",
+      "change": "modified"
+    },
+    {
+      "name": "Session Store",
+      "group": "Data",
+      "kind": "store",
+      "responsibility": "Session and hour state with CAS versioning",
+      "tech": "PostgreSQL",
+      "change": "modified"
+    },
+    {
+      "name": "Event Bus",
+      "group": "Data",
+      "kind": "queue",
+      "responsibility": "Publishes commit outcomes to observers",
+      "change": "added"
+    }
   ],
   "connections": [
-    {"from": "Web Client", "to": "API Gateway", "label": "submit command"},
-    {"from": "API Gateway", "to": "Frontend FSM", "label": "validated command"},
-    {"from": "Frontend FSM", "to": "Backend FSM", "label": "request commit"},
-    {"from": "Backend FSM", "to": "Hour Commit Service", "label": "draft + persist"},
-    {"from": "Backend FSM", "to": "Scenario Plugin", "label": "lifecycle hooks"},
-    {"from": "Hour Commit Service", "to": "Session Store", "label": "CAS write", "kind": "data"},
-    {"from": "Backend FSM", "to": "Event Bus", "label": "commit outcome", "kind": "async"}
+    {
+      "from": "Web Client",
+      "to": "API Gateway",
+      "label": "submit command"
+    },
+    {
+      "from": "API Gateway",
+      "to": "Frontend FSM",
+      "label": "validated command"
+    },
+    {
+      "from": "Frontend FSM",
+      "to": "Backend FSM",
+      "label": "request commit",
+      "change": "added"
+    },
+    {
+      "from": "Backend FSM",
+      "to": "Hour Commit Service",
+      "label": "draft + persist",
+      "change": "added"
+    },
+    {
+      "from": "Backend FSM",
+      "to": "Scenario Plugin",
+      "label": "lifecycle hooks",
+      "change": "added"
+    },
+    {
+      "from": "Hour Commit Service",
+      "to": "Session Store",
+      "label": "CAS write",
+      "kind": "data",
+      "change": "added"
+    },
+    {
+      "from": "Backend FSM",
+      "to": "Event Bus",
+      "label": "commit outcome",
+      "kind": "async",
+      "change": "added"
+    }
   ],
   "runtime_flows": [
     {
@@ -69,17 +257,66 @@
       "kind": "happy",
       "description": "The full round trip for a successful hour, from player command to rendered next hour.",
       "steps": [
-        {"from": "Web Client", "to": "API Gateway", "action": "submit hour command"},
-        {"from": "API Gateway", "to": "Frontend FSM", "action": "validate player state"},
-        {"from": "Frontend FSM", "to": "Backend FSM", "action": "request hour commit"},
-        {"from": "Backend FSM", "to": "Scenario Plugin", "action": "before_hour_tick()", "note": "200ms budget"},
-        {"from": "Backend FSM", "to": "Hour Commit Service", "action": "draft hour result"},
-        {"from": "Hour Commit Service", "to": "Session Store", "action": "persist draft with CAS version"},
-        {"from": "Session Store", "to": "Hour Commit Service", "action": "write acknowledged", "kind": "return"},
-        {"from": "Backend FSM", "to": "Scenario Plugin", "action": "after_hour_tick()"},
-        {"from": "Backend FSM", "to": "Event Bus", "action": "publish commit outcome", "kind": "async"},
-        {"from": "Backend FSM", "to": "Frontend FSM", "action": "commit acknowledged", "kind": "return"},
-        {"from": "Frontend FSM", "to": "Web Client", "action": "render next hour", "kind": "return"}
+        {
+          "from": "Web Client",
+          "to": "API Gateway",
+          "action": "submit hour command"
+        },
+        {
+          "from": "API Gateway",
+          "to": "Frontend FSM",
+          "action": "validate player state"
+        },
+        {
+          "from": "Frontend FSM",
+          "to": "Backend FSM",
+          "action": "request hour commit"
+        },
+        {
+          "from": "Backend FSM",
+          "to": "Scenario Plugin",
+          "action": "before_hour_tick()",
+          "note": "200ms budget"
+        },
+        {
+          "from": "Backend FSM",
+          "to": "Hour Commit Service",
+          "action": "draft hour result"
+        },
+        {
+          "from": "Hour Commit Service",
+          "to": "Session Store",
+          "action": "persist draft with CAS version"
+        },
+        {
+          "from": "Session Store",
+          "to": "Hour Commit Service",
+          "action": "write acknowledged",
+          "kind": "return"
+        },
+        {
+          "from": "Backend FSM",
+          "to": "Scenario Plugin",
+          "action": "after_hour_tick()"
+        },
+        {
+          "from": "Backend FSM",
+          "to": "Event Bus",
+          "action": "publish commit outcome",
+          "kind": "async"
+        },
+        {
+          "from": "Backend FSM",
+          "to": "Frontend FSM",
+          "action": "commit acknowledged",
+          "kind": "return"
+        },
+        {
+          "from": "Frontend FSM",
+          "to": "Web Client",
+          "action": "render next hour",
+          "kind": "return"
+        }
       ]
     }
   ],
@@ -87,16 +324,51 @@
     {
       "entity": "Backend FSM",
       "initial": "IDLE",
-      "values": ["IDLE", "PREPARING", "DRAFTING", "COMMITTING", "FAILED"],
+      "values": [
+        "IDLE",
+        "PREPARING",
+        "DRAFTING",
+        "COMMITTING",
+        "FAILED"
+      ],
       "notes": "FAILED is a parked state: nothing leaves it without an explicit retry.",
       "transitions": [
-        {"from": "IDLE", "to": "PREPARING", "event": "commit requested"},
-        {"from": "PREPARING", "to": "DRAFTING", "event": "preconditions ok"},
-        {"from": "PREPARING", "to": "FAILED", "event": "precondition violated"},
-        {"from": "DRAFTING", "to": "COMMITTING", "event": "draft ready"},
-        {"from": "COMMITTING", "to": "IDLE", "event": "write acknowledged"},
-        {"from": "COMMITTING", "to": "FAILED", "event": "write rejected", "guard": "CAS version moved"},
-        {"from": "FAILED", "to": "PREPARING", "event": "operator retry"}
+        {
+          "from": "IDLE",
+          "to": "PREPARING",
+          "event": "commit requested"
+        },
+        {
+          "from": "PREPARING",
+          "to": "DRAFTING",
+          "event": "preconditions ok"
+        },
+        {
+          "from": "PREPARING",
+          "to": "FAILED",
+          "event": "precondition violated"
+        },
+        {
+          "from": "DRAFTING",
+          "to": "COMMITTING",
+          "event": "draft ready"
+        },
+        {
+          "from": "COMMITTING",
+          "to": "IDLE",
+          "event": "write acknowledged"
+        },
+        {
+          "from": "COMMITTING",
+          "to": "FAILED",
+          "event": "write rejected",
+          "guard": "CAS version moved"
+        },
+        {
+          "from": "FAILED",
+          "to": "PREPARING",
+          "event": "operator retry"
+        }
       ]
     }
   ],
@@ -107,13 +379,36 @@
       "store": "PostgreSQL",
       "description": "Hot per-session state, one row per session",
       "fields": [
-        {"name": "session_id", "type": "uuid", "note": "PK"},
-        {"name": "version", "type": "bigint", "note": "CAS token"},
-        {"name": "content", "type": "jsonb"},
-        {"name": "chat_log", "type": "jsonb"},
-        {"name": "front_data", "type": "jsonb"}
+        {
+          "name": "session_id",
+          "type": "uuid",
+          "note": "PK"
+        },
+        {
+          "name": "version",
+          "type": "bigint",
+          "note": "CAS token"
+        },
+        {
+          "name": "content",
+          "type": "jsonb"
+        },
+        {
+          "name": "chat_log",
+          "type": "jsonb"
+        },
+        {
+          "name": "front_data",
+          "type": "jsonb"
+        }
       ],
-      "relations": [{"to": "hour_commit", "cardinality": "1..*", "label": "records"}]
+      "relations": [
+        {
+          "to": "hour_commit",
+          "cardinality": "1..*",
+          "label": "records"
+        }
+      ]
     },
     {
       "name": "hour_commit",
@@ -121,33 +416,83 @@
       "store": "PostgreSQL",
       "description": "One row per attempted hour commit, including failures",
       "fields": [
-        {"name": "commit_id", "type": "uuid", "note": "PK"},
-        {"name": "session_id", "type": "uuid", "note": "FK"},
-        {"name": "state", "type": "string", "note": "FSM state at rest"},
-        {"name": "attempt", "type": "int"},
-        {"name": "failed_reason", "type": "string"}
+        {
+          "name": "commit_id",
+          "type": "uuid",
+          "note": "PK"
+        },
+        {
+          "name": "session_id",
+          "type": "uuid",
+          "note": "FK"
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "note": "FSM state at rest"
+        },
+        {
+          "name": "attempt",
+          "type": "int"
+        },
+        {
+          "name": "failed_reason",
+          "type": "string"
+        }
       ],
-      "relations": [{"to": "document", "cardinality": "1..*", "label": "produces"}]
+      "relations": [
+        {
+          "to": "document",
+          "cardinality": "1..*",
+          "label": "produces"
+        }
+      ]
     },
     {
       "name": "document",
       "owner": "Hour Commit Service",
       "description": "Narrative documents produced during an hour",
       "fields": [
-        {"name": "id", "type": "bigint", "note": "PK"},
-        {"name": "name", "type": "string"},
-        {"name": "meta", "type": "jsonb"}
+        {
+          "name": "id",
+          "type": "bigint",
+          "note": "PK"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "meta",
+          "type": "jsonb"
+        }
       ],
-      "relations": [{"to": "document_version", "cardinality": "1..*", "label": "has"}]
+      "relations": [
+        {
+          "to": "document_version",
+          "cardinality": "1..*",
+          "label": "has"
+        }
+      ]
     },
     {
       "name": "document_version",
       "owner": "Hour Commit Service",
       "description": "Immutable versions of a document",
       "fields": [
-        {"name": "document_id", "type": "bigint", "note": "FK"},
-        {"name": "type", "type": "string"},
-        {"name": "meta", "type": "jsonb"}
+        {
+          "name": "document_id",
+          "type": "bigint",
+          "note": "FK"
+        },
+        {
+          "name": "type",
+          "type": "string"
+        },
+        {
+          "name": "meta",
+          "type": "jsonb"
+        }
       ]
     }
   ],
@@ -161,13 +506,42 @@
       "impact": "The hour is not committed; the player stays on the current hour",
       "mitigation": "Re-draft against the fresh version, at most twice, then park for an operator",
       "steps": [
-        {"id": "committing", "text": "Backend FSM enters COMMITTING"},
-        {"id": "write", "text": "CAS write rejected: version moved"},
-        {"id": "mark", "text": "Transition to FAILED and publish a failure event"},
-        {"id": "retry", "text": "Retry budget left?", "type": "decision",
-         "next": [{"to": "redraft", "label": "Yes"}, {"to": "park", "label": "No"}]},
-        {"id": "redraft", "text": "Re-draft against the fresh version"},
-        {"id": "park", "text": "Park for operator intervention", "type": "terminal"}
+        {
+          "id": "committing",
+          "text": "Backend FSM enters COMMITTING"
+        },
+        {
+          "id": "write",
+          "text": "CAS write rejected: version moved"
+        },
+        {
+          "id": "mark",
+          "text": "Transition to FAILED and publish a failure event"
+        },
+        {
+          "id": "retry",
+          "text": "Retry budget left?",
+          "type": "decision",
+          "next": [
+            {
+              "to": "redraft",
+              "label": "Yes"
+            },
+            {
+              "to": "park",
+              "label": "No"
+            }
+          ]
+        },
+        {
+          "id": "redraft",
+          "text": "Re-draft against the fresh version"
+        },
+        {
+          "id": "park",
+          "text": "Park for operator intervention",
+          "type": "terminal"
+        }
       ]
     },
     {
@@ -179,13 +553,43 @@
       "impact": "One hour fails to commit for sessions using that scenario",
       "mitigation": "Cancel the hook, fail the commit, disable the plugin after 3 consecutive timeouts",
       "steps": [
-        {"id": "invoke", "text": "Backend FSM invokes before_hour_tick()"},
-        {"id": "deadline", "text": "Deadline exceeded at 200ms"},
-        {"id": "cancel", "text": "Cancel the hook and mark the commit FAILED"},
-        {"id": "circuit", "text": "Third consecutive timeout?", "type": "decision",
-         "next": [{"to": "disable", "label": "Yes"}, {"to": "alert", "label": "No"}]},
-        {"id": "disable", "text": "Disable the plugin and alert the author", "type": "terminal"},
-        {"id": "alert", "text": "Emit a warning metric only", "type": "terminal"}
+        {
+          "id": "invoke",
+          "text": "Backend FSM invokes before_hour_tick()"
+        },
+        {
+          "id": "deadline",
+          "text": "Deadline exceeded at 200ms"
+        },
+        {
+          "id": "cancel",
+          "text": "Cancel the hook and mark the commit FAILED"
+        },
+        {
+          "id": "circuit",
+          "text": "Third consecutive timeout?",
+          "type": "decision",
+          "next": [
+            {
+              "to": "disable",
+              "label": "Yes"
+            },
+            {
+              "to": "alert",
+              "label": "No"
+            }
+          ]
+        },
+        {
+          "id": "disable",
+          "text": "Disable the plugin and alert the author",
+          "type": "terminal"
+        },
+        {
+          "id": "alert",
+          "text": "Emit a warning metric only",
+          "type": "terminal"
+        }
       ]
     }
   ],
@@ -194,7 +598,11 @@
       "name": "Phase 1 · Scaffolding",
       "description": "Introduce the Backend FSM behind a feature flag and mirror commits without acting on them.",
       "duration": "2 weeks",
-      "deliverables": ["Backend FSM skeleton", "Mirror-and-compare harness", "commit_failed_total metric"],
+      "deliverables": [
+        "Backend FSM skeleton",
+        "Mirror-and-compare harness",
+        "commit_failed_total metric"
+      ],
       "exit_criteria": "Mirrored outcomes match the legacy path for 99.9% of hours over 3 days",
       "risk": "low"
     },
@@ -202,8 +610,14 @@
       "name": "Phase 2 · Migration",
       "description": "Move hour commit execution behind the Backend FSM, keeping the legacy path as a fallback.",
       "duration": "3 weeks",
-      "depends_on": ["Phase 1 · Scaffolding"],
-      "deliverables": ["Commit execution moved", "Operator retry endpoint", "Runbook"],
+      "depends_on": [
+        "Phase 1 · Scaffolding"
+      ],
+      "deliverables": [
+        "Commit execution moved",
+        "Operator retry endpoint",
+        "Runbook"
+      ],
       "exit_criteria": "One full release with zero fallbacks to the legacy path",
       "risk": "high"
     },
@@ -211,8 +625,13 @@
       "name": "Phase 3 · Cleanup",
       "description": "Delete the legacy commit path, the flag and the mirroring code.",
       "duration": "1 week",
-      "depends_on": ["Phase 2 · Migration"],
-      "deliverables": ["Legacy path deleted", "Flag removed"],
+      "depends_on": [
+        "Phase 2 · Migration"
+      ],
+      "deliverables": [
+        "Legacy path deleted",
+        "Flag removed"
+      ],
       "exit_criteria": "No references to the legacy commit path remain",
       "risk": "low"
     }
@@ -223,15 +642,39 @@
       "status": "accepted",
       "context": "A single FSM owning both progression and commit cannot represent 'the player moved on but the write failed'.",
       "alternatives": [
-        {"name": "Single FSM owning both concerns",
-         "pros": ["No new boundary", "Fewer moving parts"],
-         "cons": ["Cannot express partial failure", "Every commit bug is a player-visible bug"]},
-        {"name": "Two FSMs with an explicit boundary",
-         "pros": ["Failure states are explicit", "Commit can retry without touching the player view"],
-         "cons": ["Two things to keep in sync", "Needs reconciliation"]},
-        {"name": "Event-sourced commit log with no FSM",
-         "pros": ["Full audit trail", "Replayable"],
-         "cons": ["Large rewrite", "Operators lose a simple state to read"]}
+        {
+          "name": "Single FSM owning both concerns",
+          "pros": [
+            "No new boundary",
+            "Fewer moving parts"
+          ],
+          "cons": [
+            "Cannot express partial failure",
+            "Every commit bug is a player-visible bug"
+          ]
+        },
+        {
+          "name": "Two FSMs with an explicit boundary",
+          "pros": [
+            "Failure states are explicit",
+            "Commit can retry without touching the player view"
+          ],
+          "cons": [
+            "Two things to keep in sync",
+            "Needs reconciliation"
+          ]
+        },
+        {
+          "name": "Event-sourced commit log with no FSM",
+          "pros": [
+            "Full audit trail",
+            "Replayable"
+          ],
+          "cons": [
+            "Large rewrite",
+            "Operators lose a simple state to read"
+          ]
+        }
       ],
       "chosen": "Two FSMs with an explicit boundary",
       "reason": "It makes the failure surface explicit at the smallest migration cost, and keeps a single readable state for operators.",
@@ -242,8 +685,24 @@
       "status": "accepted",
       "context": "Scenario hooks need to observe and veto a commit, but must not be able to hang it.",
       "alternatives": [
-        {"name": "Inline with a 200ms deadline", "pros": ["Hooks can veto"], "cons": ["Adds latency to every hour"]},
-        {"name": "Async after commit", "pros": ["Zero latency cost"], "cons": ["Hooks cannot veto a bad commit"]}
+        {
+          "name": "Inline with a 200ms deadline",
+          "pros": [
+            "Hooks can veto"
+          ],
+          "cons": [
+            "Adds latency to every hour"
+          ]
+        },
+        {
+          "name": "Async after commit",
+          "pros": [
+            "Zero latency cost"
+          ],
+          "cons": [
+            "Hooks cannot veto a bad commit"
+          ]
+        }
       ],
       "chosen": "Inline with a 200ms deadline",
       "reason": "Veto power is the whole point of the hook; 200ms fits inside the 800ms latency goal.",
@@ -251,12 +710,30 @@
     }
   ],
   "risks": [
-    {"title": "State divergence between the two FSMs", "severity": "high", "likelihood": "medium",
-     "impact": "Player sees an hour that was never committed", "mitigation": "CAS versioning plus a reconciliation job", "owner": "Platform"},
-    {"title": "Plugin hooks slow the commit path", "severity": "medium", "likelihood": "high",
-     "impact": "p95 latency breaches the 800ms goal", "mitigation": "200ms hook budget with a hard cancel", "owner": "Scenarios"},
-    {"title": "Migration doubles write load", "severity": "medium", "likelihood": "medium",
-     "impact": "Store saturation during Phase 1", "mitigation": "Mirror at 10% sampling before ramping", "owner": "Platform"}
+    {
+      "title": "State divergence between the two FSMs",
+      "severity": "high",
+      "likelihood": "medium",
+      "impact": "Player sees an hour that was never committed",
+      "mitigation": "CAS versioning plus a reconciliation job",
+      "owner": "Platform"
+    },
+    {
+      "title": "Plugin hooks slow the commit path",
+      "severity": "medium",
+      "likelihood": "high",
+      "impact": "p95 latency breaches the 800ms goal",
+      "mitigation": "200ms hook budget with a hard cancel",
+      "owner": "Scenarios"
+    },
+    {
+      "title": "Migration doubles write load",
+      "severity": "medium",
+      "likelihood": "medium",
+      "impact": "Store saturation during Phase 1",
+      "mitigation": "Mirror at 10% sampling before ramping",
+      "owner": "Platform"
+    }
   ],
   "constraints": [
     "The public HTTP API shape cannot change this phase",
@@ -264,16 +741,127 @@
     "Player-visible latency budget is 800ms p95"
   ],
   "open_questions": [
-    {"question": "Should a FAILED commit auto-retry, or always wait for an operator?", "owner": "Platform", "blocking": true},
-    {"question": "Where does the retry budget live — per session or global?", "owner": "Platform", "blocking": false}
+    {
+      "question": "Should a FAILED commit auto-retry, or always wait for an operator?",
+      "owner": "Platform",
+      "blocking": true
+    },
+    {
+      "question": "Where does the retry budget live — per session or global?",
+      "owner": "Platform",
+      "blocking": false
+    }
   ],
   "metrics": [
-    {"name": "p95 hour commit latency", "target": "< 800ms"},
-    {"name": "Commits needing manual intervention", "target": "< 0.1%"},
-    {"name": "Mirror mismatch rate (Phase 1)", "target": "< 0.1%"}
+    {
+      "name": "p95 hour commit latency",
+      "target": "< 800ms"
+    },
+    {
+      "name": "Commits needing manual intervention",
+      "target": "< 0.1%"
+    },
+    {
+      "name": "Mirror mismatch rate (Phase 1)",
+      "target": "< 0.1%"
+    }
   ],
   "glossary": [
-    {"term": "Hour commit", "definition": "The durable write that advances the simulation by one in-world hour"},
-    {"term": "CAS", "definition": "Compare-and-set write guarded by a version token"}
+    {
+      "term": "Hour commit",
+      "definition": "The durable write that advances the simulation by one in-world hour"
+    },
+    {
+      "term": "CAS",
+      "definition": "Compare-and-set write guarded by a version token"
+    }
+  ],
+  "current_state": {
+    "summary": "One HourFSM in engine/fsm.py owns both the player-visible hour and the durable write. Scenario hooks are compiled into the engine and session_cache is written with no version guard.",
+    "pain_points": [
+      "A failed database write leaves the frontend an hour ahead of the stored state",
+      "Operators recover by hand-editing session_cache",
+      "Scenario rules cannot change without an engine release",
+      "Nothing counts failed commits, so the failure rate is unknown"
+    ]
+  },
+  "changes": [
+    {
+      "target": "Backend FSM",
+      "kind": "component",
+      "type": "added",
+      "what": "New state machine owning PREPARING → DRAFTING → COMMITTING → FAILED",
+      "why": "Partial failure needs a state of its own, separate from what the player sees",
+      "files": [
+        "engine/backend_fsm.py"
+      ],
+      "risk": "medium"
+    },
+    {
+      "target": "Hour Commit Service",
+      "kind": "component",
+      "type": "added",
+      "what": "Drafting, validation and persistence lifted out of the FSM",
+      "why": "Orchestration and execution fail for different reasons and should be separable",
+      "files": [
+        "engine/hour_commit.py"
+      ],
+      "risk": "medium"
+    },
+    {
+      "target": "Frontend FSM",
+      "kind": "component",
+      "type": "modified",
+      "what": "Keeps player progression only; delegates the commit and waits for an ack",
+      "why": "It should never be the thing that decides a write succeeded",
+      "files": [
+        "engine/fsm.py"
+      ],
+      "risk": "high"
+    },
+    {
+      "target": "Session Store",
+      "kind": "component",
+      "type": "modified",
+      "what": "Adds a version column and a CAS write path",
+      "why": "Concurrent writes are currently silent; the FSM cannot detect them",
+      "files": [
+        "migrations/0042_session_cache_version.sql"
+      ],
+      "risk": "medium"
+    },
+    {
+      "target": "Scenario Plugin",
+      "kind": "component",
+      "type": "modified",
+      "what": "Hooks move from compiled-in calls to a registered before/after pair with a deadline",
+      "why": "Scenario rules should ship without an engine release, and must not be able to hang a commit",
+      "files": [
+        "engine/plugins/api.py"
+      ],
+      "risk": "medium"
+    },
+    {
+      "target": "Event Bus",
+      "kind": "component",
+      "type": "added",
+      "what": "Publishes every commit outcome, success or failure",
+      "why": "Operators and the failure metric both need a feed",
+      "files": [
+        "engine/events.py"
+      ],
+      "risk": "low"
+    },
+    {
+      "target": "Legacy commit path",
+      "kind": "process",
+      "type": "removed",
+      "what": "Deleted once phase 2 has run one release without a fallback",
+      "why": "Two commit paths is exactly the ambiguity this design removes",
+      "files": [
+        "engine/fsm.py"
+      ],
+      "risk": "low"
+    }
   ]
 }

@@ -24,7 +24,7 @@ from typing import Any, Dict
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import read_json, write_json, write_text  # noqa: E402
 from parse_design import parse  # noqa: E402
-from render_html import MERMAID_URLS, TEMPLATE, render  # noqa: E402
+from render_html import MERMAID_URLS, TEMPLATE, attach_document, render  # noqa: E402
 
 README = """# {title} — design explorer
 
@@ -37,7 +37,7 @@ everything is in that one file.
 | --- | --- |
 | `design-explorer.html` | The interactive explorer: navigation, diagrams, decisions, risks |
 | `design-summary.json` | The structured extraction every view is generated from |
-| `assets/*.mmd` | One mermaid definition per view, if you want to reuse them |
+| `assets/*` | One diagram source per view — `.mmd` for mermaid, `.svg` for the hand-laid story lanes |
 
 ## Views
 
@@ -74,7 +74,10 @@ def bundle(summary: Dict[str, Any], out_dir: Path, *, inline_mermaid: str = "",
     write_json(out_dir / "design-summary.json", clean)
     for view in result["views"]:
         for d in view["diagrams"]:
-            write_text(out_dir / "assets" / f'{d["id"]}.mmd', d["mermaid"] + "\n")
+            if d.get("mermaid"):
+                write_text(out_dir / "assets" / f'{d["id"]}.mmd', d["mermaid"] + "\n")
+            elif d.get("svg"):
+                write_text(out_dir / "assets" / f'{d["id"]}.svg', d["svg"] + "\n")
 
     views_md = "\n".join(
         f'- **{v["title"]}** — ' + "; ".join(d["title"] for d in v["diagrams"])
@@ -102,6 +105,8 @@ def main() -> int:
     ap.add_argument("--inline-mermaid", default="")
     ap.add_argument("--mermaid-url", action="append", default=[])
     ap.add_argument("--lang", choices=["auto", "en", "zh"], default="auto")
+    ap.add_argument("--with-document", default="",
+                    help="ship the source design doc inside the page")
     ap.add_argument("--zip", action="store_true", help="also produce <out-dir>.zip")
     args = ap.parse_args()
 
@@ -111,12 +116,14 @@ def main() -> int:
     else:
         summary = read_json(args.summary)
 
+    if args.with_document:
+        summary = attach_document(summary, args.with_document)
     out = Path(args.out_dir)
     result = bundle(summary, out, inline_mermaid=args.inline_mermaid, fmt=args.format,
                     mermaid_urls=args.mermaid_url or None, lang=args.lang)
     print(f"bundle written to {out}/")
     print(f"  design-explorer.html  {(out / 'design-explorer.html').stat().st_size // 1024} KB")
-    print(f"  assets/               {sum(len(v['diagrams']) for v in result['views'])} .mmd files")
+    print(f"  assets/               {sum(len(v['diagrams']) for v in result['views'])} diagram files")
     warns = [c for c in result["checks"] if c["level"] == "warn"]
     if warns:
         print(f"  {len(warns)} consistency warning(s) — see README.md")
