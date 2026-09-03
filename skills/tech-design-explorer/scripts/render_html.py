@@ -57,7 +57,7 @@ def render(summary: Dict[str, Any], *, mermaid_urls: List[str], inline_mermaid: 
 
     tpl = template.read_text(encoding="utf-8")
     title = bundle["summary"].get("title") or "Technical Design"
-    html = tpl.replace("__TITLE__", f"{title} · Design Explorer")
+    html = tpl.replace("__TITLE__", title)
     html = html.replace("__DESIGN_PAYLOAD__", payload_script(bundle))
 
     if inline_mermaid:

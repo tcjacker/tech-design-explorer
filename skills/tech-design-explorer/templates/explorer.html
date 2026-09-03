@@ -1075,7 +1075,7 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
     ]));
     $("#brandName").textContent = S.title || "Technical Design";
     if (S.status) { var bs = $("#brandStatus"); bs.textContent = S.status; bs.hidden = false; }
-    document.title = (S.title || "Technical Design") + " · Design Explorer";
+    document.title = S.title || "Technical Design";
   }
 
   /* ---------- assemble ---------- */
@@ -1292,12 +1292,16 @@ svg .node-hot rect, svg .node-hot circle, svg .node-hot polygon, svg .node-hot p
   build();
   wire();
   wireAsk();
-  // first paint of whatever is on screen
+  // first paint of whatever is on screen …
   setTimeout(function () {
     document.querySelectorAll(".card").forEach(function (c) {
       var r = c.getBoundingClientRect();
       if (r.top < window.innerHeight * 1.2) { c.classList.add("in"); renderVisible(c); }
     });
   }, 30);
+  // … and a failsafe: nothing stays parked at opacity 0 waiting on an observer
+  setTimeout(function () {
+    document.querySelectorAll(".card:not(.in)").forEach(function (c) { c.classList.add("in"); });
+  }, 1200);
 })();
 </script>
